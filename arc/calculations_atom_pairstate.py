@@ -1027,6 +1027,7 @@ class PairStateInteractions:
         if progressOutput or debugOutput:
             print("\nCalculating Hamiltonian matrix...\n")
 
+        #The dimension of the interaction matrix
         dimension = len(self.basisStates)
         if progressOutput or debugOutput:
             print("\n\tmatrix (dimension ",dimension,")\n")
@@ -1040,6 +1041,7 @@ class PairStateInteractions:
                            for i in xrange(self.interactionsUpTo*2-1) ]
 
         matRIndex = 0
+        #coupling 
         for c in self.coupling:
             progress = 0.
             for ii in xrange(len(self.channel)):
