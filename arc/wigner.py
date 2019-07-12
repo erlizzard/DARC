@@ -315,7 +315,8 @@ def CG(j1,m1,j2,m2,j3,m3):
     """
         returns < j1,m1,j2,m2 | j1,j2, j3, m3 >
     """
-    return Wigner3j(j1,j2,j3,m1,m2,-m3)*sqrt(2*j3+1)*(-1)**(j1-j2+m3)
+    #LIZZY tHIS NEEDS TO BE CHANGED
+    return Wigner3j(j1,j2,j3,m1,m2,-m3)*sqrt(2*j3+1)*(-1.0)**(j1-j2+m3)
 
 
 class wignerDmatrix:

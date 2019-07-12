@@ -22,20 +22,23 @@ import numpy as np
 import re
 import shutil
 
-from .wigner import Wigner6j, Wigner3j, CG, wignerDmatrix
+from .wigner import Wigner6j,Wigner3j,wignerD,CG,wignerDmatrix
 from scipy.constants import physical_constants, pi , epsilon_0, hbar
 from scipy.constants import k as C_k
 from scipy.constants import c as C_c
 from scipy.constants import h as C_h
 from scipy.constants import e as C_e
 from scipy.constants import m_e as C_m_e
-
+from scipy.optimize import curve_fit
 # for matrices
+from numpy import zeros,savetxt, complex64,complex128
 from numpy.linalg import eigvalsh,eig,eigh
 from numpy.ma import conjugate
 from numpy.lib.polynomial import real
 
 from scipy.sparse import csr_matrix
+from scipy.sparse import kron as kroneckerp
+from scipy.sparse.linalg import eigsh
 from scipy.special.specfun import fcoef
 from scipy import floor
 
@@ -50,6 +53,7 @@ except:
 import gzip
 import csv
 import sqlite3
+import mpmath
 sqlite3.register_adapter(np.float64, float)
 sqlite3.register_adapter(np.float32, float)
 sqlite3.register_adapter(np.int64, int)
@@ -517,7 +521,7 @@ class AlkaliAtom(object):
             # j = l+1/2
             self.sEnergy[l, n] = energyNIST - self.ionisationEnergy
 
-    def getTransitionWavelength(self,n1,l1,j1,n2,l2,j2):
+    def getTransitionWavelength(self,n1,l1,j1,n2,l2,j2, s=0.5):
         """
             Calculated transition wavelength (in vacuum) in m.
 
@@ -538,7 +542,8 @@ class AlkaliAtom(object):
                     level from which we are going is **above** the level to which we are
                     going.
         """
-        return (C_h*C_c)/((self.getEnergy(n2, l2, j2)-self.getEnergy(n1, l1, j1))*C_e)
+
+        return (C_h*C_c)/((self.getEnergy(n2, l2, j2, s)-self.getEnergy(n1, l1, j1, s))*C_e)
 
     def getTransitionFrequency(self,n1,l1,j1,n2,l2,j2):
         """
@@ -564,7 +569,7 @@ class AlkaliAtom(object):
         return (self.getEnergy(n2, l2, j2)-self.getEnergy(n1, l1, j1))*C_e/C_h
 
 
-    def getEnergy(self,n,l,j):
+    def getEnergy(self,n,l,j,s = 0.5):
         """
             Energy of the level relative to the ionisation level (in eV)
 
@@ -587,6 +592,11 @@ class AlkaliAtom(object):
         """
         if l>=n:
             raise ValueError("Requested energy for state l=%d >= n=%d !" % (l,n))
+
+        if (isinstance(self,AlkaliAtom) and s != 0.5):
+            raise ValueError('Spin state quantum number for AlkaliAtom must be 0.5 ')
+        #if (isinstance(self,EarthAlkaliAtom) and s == 0.5):
+        #    raise ValueError('Spin state for EarthAlkaliAtom mus be explicitly defined')
 
         if abs(j-(l-0.5))<0.001:
             # j = l-1/2
@@ -653,7 +663,7 @@ class AlkaliAtom(object):
                     self.quantumDefect[1][l][5]/((n-self.quantumDefect[1][l][0])**10)
         return defect
 
-    def getRadialMatrixElement(self,n1,l1,j1,n2,l2,j2,useLiterature=True):
+    def getRadialMatrixElement(self,n1,l1,j1,n2,l2,j2,s= 0.5,useLiterature=True):
         """
             Radial part of the dipole matrix element
 
@@ -715,12 +725,12 @@ class AlkaliAtom(object):
             return dme[0]
 
         step = 0.001
-        r1,psi1_r1 = self.radialWavefunction(l1,0.5,j1,\
-                                               self.getEnergy(n1, l1, j1)/27.211,\
+        r1,psi1_r1 = self.radialWavefunction(l1,s,j1,\
+                                               self.getEnergy(n1, l1, j1,s)/27.211,\
                                                self.alphaC**(1/3.0),\
                                                 2.0*n1*(n1+15.0), step)
-        r2,psi2_r2 = self.radialWavefunction(l2,0.5,j2,\
-                                               self.getEnergy(n2, l2, j2)/27.211,\
+        r2,psi2_r2 = self.radialWavefunction(l2,s,j2,\
+                                               self.getEnergy(n2, l2, j2,s)/27.211,\
                                                self.alphaC**(1/3.0),\
                                                 2.0*n2*(n2+15.0), step)
 
@@ -736,9 +746,31 @@ class AlkaliAtom(object):
 
         return dipoleElement
 
+    def getRadialMatrixElementSemiClassical(self,n,l,j,n1,l1,j1):
+        #get the effective principal number of both states
+        nu = n - self.getQuantumDefect(n,l,j)
+        nu1 = n1 - self.getQuantumDefect(n1,l1,j1)
+
+        #get the parameters required to calculate the sum
+        l_c = (l+l1+1.)/2.
+        nu_c = sqrt(nu*nu1)
+
+        delta_nu = nu- nu1
+        delta_l = l1 -l
+
+        gamma  = (delta_l*l_c)/nu_c
+
+        g0 = (1./(3.*delta_nu))*(mpmath.angerj(delta_nu-1.,-delta_nu) - mpmath.angerj(delta_nu+1,-delta_nu))
+        g1 = -(1./(3.*delta_nu))*(mpmath.angerj(delta_nu-1.,-delta_nu) + mpmath.angerj(delta_nu+1,-delta_nu))
+        g2 = g0 - mpmath.sin(pi*delta_nu)/(pi*delta_nu)
+        g3 = (delta_nu/2.)*g0 + g1
+
+        radial_ME = (3/2)*nu_c**2*(1-(l_c/nu_c)**(2))**0.5*(g0 + gamma*g1 + gamma**2*g2 + gamma**3*g3)
+
+        return radial_ME
 
 
-    def getQuadrupoleMatrixElement(self,n1,l1,j1,n2,l2,j2):
+    def getQuadrupoleMatrixElement(self,n1,l1,j1,n2,l2,j2,s = 0.5):
         """
             Radial part of the quadrupole matrix element
 
@@ -766,7 +798,7 @@ class AlkaliAtom(object):
         if not ((dl==0 or dl==2 or dl==1)and (dj<2.1)):
             return 0
 
-        if (self.getEnergy(n1, l1, j1)>self.getEnergy(n2, l2, j2)):
+        if (self.getEnergy(n1, l1, j1,s)>self.getEnergy(n2, l2, j2,s)):
             temp = n1
             n1 = n2
             n2 = temp
@@ -795,12 +827,12 @@ class AlkaliAtom(object):
         # if it wasn't, calculate now
 
         step = 0.001
-        r1, psi1_r1 = self.radialWavefunction(l1,0.5,j1,\
-                                               self.getEnergy(n1, l1, j1)/27.211,\
+        r1, psi1_r1 = self.radialWavefunction(l1,s,j1,\
+                                               self.getEnergy(n1, l1, j1,s)/27.211,\
                                                self.alphaC**(1/3.0), \
                                                2.0*n1*(n1+15.0), step)
         r2, psi2_r2 = self.radialWavefunction(l2,0.5,j2,\
-                                               self.getEnergy(n2, l2, j2)/27.211,\
+                                               self.getEnergy(n2, l2, j2,s)/27.211,\
                                                self.alphaC**(1/3.0), \
                                                2.0*n2*(n2+15.0), step)
 
@@ -872,7 +904,7 @@ class AlkaliAtom(object):
                 sqrt(float(max(l1,l2))/(2.0*l1+1.0))*\
                 self.getRadialMatrixElement(n1, l1, j1, n2, l2, j2)
 
-    def getReducedMatrixElementL(self,n1,l1,j1,n2,l2,j2):
+    def getReducedMatrixElementL(self,n1,l1,j1,n2,l2,j2,semi):
         """
             Reduced matrix element in :math:`L` basis (symmetric notation)
 
@@ -889,12 +921,15 @@ class AlkaliAtom(object):
                     reduced dipole matrix element in :math:`L` basis
                     :math:`\\langle l || er || l' \\rangle` (:math:`a_0 e`).
         """
+        if semi ==True:
+            r = self.getRadialMatrixElementSemiClassical(n1, l1, j1, n2, l2, j2)
+        else:
+            r=  self.getRadialMatrixElement(n1, l1, j1, n2, l2, j2)
 
         return (-1)**l1*sqrt((2.0*l1+1.0)*(2.0*l2+1.0))*\
-                Wigner3j(l1,1,l2,0,0,0)*\
-                self.getRadialMatrixElement(n1, l1, j1, n2, l2, j2)
+                Wigner3j(l1,1,l2,0,0,0)*r
 
-    def getReducedMatrixElementJ(self,n1,l1,j1,n2,l2,j2):
+    def getReducedMatrixElementJ(self,n1,l1,j1,n2,l2,j2,semi):
         """
             Reduced matrix element in :math:`J` basis (symmetric notation)
 
@@ -914,10 +949,10 @@ class AlkaliAtom(object):
 
         return (-1)**(int(l1+0.5+j2+1.))*sqrt((2.*j1+1.)*(2.*j2+1.))*\
                 Wigner6j(j1, 1., j2, l2, 0.5, l1)*\
-                self.getReducedMatrixElementL(n1,l1,j1,n2,l2,j2)
+                self.getReducedMatrixElementL(n1,l1,j1,n2,l2,j2,semi)
 
 
-    def getDipoleMatrixElement(self,n1,l1,j1,mj1,n2,l2,j2,mj2,q):
+    def getDipoleMatrixElement(self,n1,l1,j1,mj1,n2,l2,j2,mj2,q,semi):
         """
             Dipole matrix element
             :math:`\\langle n_1 l_1 j_1 m_{j_1} |e\\mathbf{r}|n_2 l_2 j_2 m_{j_2}\\rangle`
@@ -944,7 +979,7 @@ class AlkaliAtom(object):
             return 0
         return (-1)**(int(j1-mj1))*\
                 Wigner3j(j1, 1, j2, -mj1, -q, mj2)*\
-                self.getReducedMatrixElementJ(n1,l1,j1,n2,l2,j2)
+                self.getReducedMatrixElementJ(n1,l1,j1,n2,l2,j2,semi)
 
     def getRabiFrequency(self,n1,l1,j1,mj1,n2,l2,j2,q,laserPower,laserWaist):
         """
@@ -994,7 +1029,7 @@ class AlkaliAtom(object):
         freq = electricFieldAmplitude*abs(dipole)/hbar
         return freq
 
-    def getC6term(self,n,l,j,n1,l1,j1,n2,l2,j2):
+    def getC6term(self,n,l,j, n1,l1,j1, n2,l2,j2, m,mm,m1, m2,q1,q2,semi):
         """
             C6 interaction term for the given two pair-states
 
@@ -1066,14 +1101,116 @@ class AlkaliAtom(object):
                     https://doi.org/10.1103/PhysRevA.77.032723
 
         """
-        d1 = self.getRadialMatrixElement(n,l,j,n1,l1,j1)
-        d2 = self.getRadialMatrixElement(n,l,j,n2,l2,j2)
+        d1 = self.getDipoleMatrixElement(n,l,j,m,n1,l1,j1,m1,q1,semi)
+        d2 = self.getDipoleMatrixElement(n,l,j,mm,n2,l2,j2,m2,q2,semi)
+
+        #print(d1,self.getRadialMatrixElementSemiClassical(n,l,j,n1,l1,j1))
+        #print(d2 , self.getRadialMatrixElementSemiClassical(n,l,j,n2,l2,j2))
+
         d1d2 = 1/(4.0*pi*epsilon_0)*d1*d2*C_e**2*\
                 (physical_constants["Bohr radius"][0])**2
+        #d1d2 = d1*d2
+
+        return -d1d2**2/(C_e*(self.getEnergy(n1,l1,j1)+\
+                                     self.getEnergy(n2,l2,j2)-\
+                                     2*self.getEnergy(n,l,j)))
+    def getC6termSemiClassical(self,n,l,j,n1,l1,j1,n2,l2,j2):
+        """
+            C6 interaction term for the given two pair-states
+
+            Calculates :math:`C_6` intaraction term for :math:`|n,l,j,n,l,j\\rangle\
+            \\leftrightarrow |n_1,l_1,j_1,n_2,l_2,j_2\\rangle`. For details
+            of calculation see Ref. [#c6r1]_.
+
+            Args:
+                n (int): principal quantum number
+                l (int): orbital angular momenutum
+                j (float): total angular momentum
+                n1 (int): principal quantum number
+                l1 (int): orbital angular momentum
+                j1 (float): total angular momentum
+                n2 (int): principal quantum number
+                l2 (int): orbital angular momentum
+                j2 (float): total angular momentum
+
+            Returns:
+                float:  :math:`C_6 = \\frac{1}{4\\pi\\varepsilon_0} \
+                    \\frac{|\\langle n,l,j |er|n_1,l_1,j_1\\rangle|^2|\
+                    \\langle n,l,j |er|n_2,l_2,j_2\\rangle|^2}\
+                    {E(n_1,l_1,j_2,n_2,j_2,j_2)-E(n,l,j,n,l,j)}`
+                (:math:`h` Hz m :math:`{}^6`).
+
+            Example:
+                We can reproduce values from Ref. [#c6r1]_ for C3 coupling
+                to particular channels. Taking for example channels described
+                by the Eq. (50a-c) we can get the values::
+
+                    from arc import *
+
+                    channels = [[70,0,0.5, 70, 1,1.5, 69,1, 1.5],\\
+                                [70,0,0.5, 70, 1,1.5, 69,1, 0.5],\\
+                                [70,0,0.5, 69, 1,1.5, 70,1, 0.5],\\
+                                [70,0,0.5, 70, 1,0.5, 69,1, 0.5]]
+
+                    print(" = = = Caesium = = = ")
+                    atom = Caesium()
+                    for channel in channels:
+                        print("%.0f  GHz (mu m)^6" % ( atom.getC6term(*channel) / C_h * 1.e27 ))
+
+                    print("\\n = = = Rubidium  = = =")
+                    atom = Rubidium()
+                    for channel in channels:
+                        print("%.0f  GHz (mu m)^6" % ( atom.getC6term(*channel) / C_h * 1.e27 ))
+
+                Returns::
+
+                     = = = Caesium = = =
+                    722  GHz (mu m)^6
+                    316  GHz (mu m)^6
+                    383  GHz (mu m)^6
+                    228  GHz (mu m)^6
+
+                     = = = Rubidium  = = =
+                    799  GHz (mu m)^6
+                    543  GHz (mu m)^6
+                    589  GHz (mu m)^6
+                    437  GHz (mu m)^6
+
+                which is in good agreement with the values cited in the Ref. [#c6r1]_.
+                Small discrepancies for Caesium originate from slightly different
+                quantum defects used in calculations.
+
+
+            References:
+                .. [#c6r1] T. G. Walker, M. Saffman, PRA **77**, 032723 (2008)
+                    https://doi.org/10.1103/PhysRevA.77.032723
+
+        """
+        d1 = self.getRadialMatrixElementSemiClassical(n,l,j,n1,l1,j1)
+        d2 = self.getRadialMatrixElementSemiClassical(n,l,j,n2,l2,j2)
+        d1d2 = 1/(4.0*pi*epsilon_0)*d1*d2*C_e**2*\
+                (physical_constants["Bohr radius"][0])**2
+        #d1d2 = d1*d2
         return -d1d2**2/(C_e*(self.getEnergy(n1,l1,j1)+\
                                      self.getEnergy(n2,l2,j2)-\
                                      2*self.getEnergy(n,l,j)))
 
+    def getDoubleRadialMESemiClassical(self,n,l,j,n1,l1,j1,n2,l2,j2):
+        d1 = self.getRadialMatrixElementSemiClassical(n,l,j,n1,l1,j1)
+        d2 = self.getRadialMatrixElementSemiClassical(n,l,j,n2,l2,j2)
+        #d1d2 = 1/(4.0*pi*epsilon_0)*d1*d2*C_e**2*\
+        #        (physical_constants["Bohr radius"][0])**2
+        d1d2 = d1*d2
+        return -d1d2**2#
+
+    def getDoubleRadialME(self,n,l,j,n1,l1,j1,n2,l2,j2):
+        d1 = self.getRadialMatrixElement(n,l,j,n1,l1,j1)
+        d2 = self.getRadialMatrixElement(n,l,j,n2,l2,j2)
+        #d1d2 = 1/(4.0*pi*epsilon_0)*d1*d2*C_e**2*\
+        #        (physical_constants["Bohr radius"][0])**2
+        d1d2 = d1*d2
+
+        return -d1d2**2
     def getC3term(self,n,l,j,n1,l1,j1,n2,l2,j2):
         """
             C3 interaction term for the given two pair-states
@@ -1103,7 +1240,7 @@ class AlkaliAtom(object):
                 (physical_constants["Bohr radius"][0])**2
         return d1d2
 
-    def getEnergyDefect(self,n,l,j,n1,l1,j1,n2,l2,j2):
+    def getEnergyDefect(self,n,l,j,n1,l1,j1,n2,l2,j2,s = 0.5):
         """
             Energy defect for the given two pair-states (one of the state has
             two atoms in the same state)
@@ -1125,10 +1262,10 @@ class AlkaliAtom(object):
             Returns:
                 float:  energy defect (SI units: J)
         """
-        return C_e*(self.getEnergy(n1,l1,j1)+self.getEnergy(n2,l2,j2)-\
-                           2*self.getEnergy(n,l,j))
+        return C_e*(self.getEnergy(n1,l1,j1,s)+self.getEnergy(n2,l2,j2,s)-\
+                           2*self.getEnergy(n,l,j,s))
 
-    def getEnergyDefect2(self,n,l,j,nn,ll,jj,n1,l1,j1,n2,l2,j2):
+    def getEnergyDefect2(self,n,l,j,nn,ll,jj,n1,l1,j1,n2,l2,j2,s=0.5):
         """
             Energy defect for the given two pair-states
 
@@ -1158,8 +1295,8 @@ class AlkaliAtom(object):
             Returns:
                 float:  energy defect (SI units: J)
         """
-        return C_e*(self.getEnergy(n1,l1,j1)+self.getEnergy(n2,l2,j2)-\
-                           self.getEnergy(n,l,j)-self.getEnergy(nn,ll,jj))
+        return C_e*(self.getEnergy(n1,l1,j1,s)+self.getEnergy(n2,l2,j2,s)-\
+                           self.getEnergy(n,l,j,s)-self.getEnergy(nn,ll,jj,s))
 
     def updateDipoleMatrixElementsFile(self):
         """
@@ -1246,6 +1383,7 @@ class AlkaliAtom(object):
                                 C_e*(physical_constants["Bohr radius"][0])
 
         else:
+            #LIZZY: how come we are using the get redcued matrix element
             dipoleRadialPart = self.getReducedMatrixElementJ_asymmetric(n2, l2, j2,\
                                                                         n1, l1, j1)*\
                                 C_e*(physical_constants["Bohr radius"][0])
@@ -1339,15 +1477,14 @@ class AlkaliAtom(object):
                                                     temperature)
         # sum over additional states
         for state in self.extraLevels:
-            if (abs(j-state[2])<1.1) and \
-                (abs(state[1]- l)<1.1) and (abs(state[1]- l) > 0.9):
+            if (abs(j-state[2])<0.6) and (state[2]!= l):
                 transitionRate += self.getTransitionRate(n,l,j,\
                                                     state[0],state[1],state[2],\
                                                     temperature)
 
         return 1./transitionRate
 
-    def getRadialCoupling(self,n,l,j,n1,l1,j1):
+    def getRadialCoupling(self,n,l,j,n1,l1,j1,s,semi):
         """
             Returns radial part of the coupling between two states (dipole and
             quadrupole interactions only)
@@ -1366,13 +1503,22 @@ class AlkaliAtom(object):
 
         """
         dl = abs(l-l1)
+
+        # LIZZY We currently don't have the radial model potetnial working yet
+        #so if it is strontium then we have to use the semiClassical
+        if s == 1:
+            semi == True
+
         if (dl == 1 and abs(j-j1)<1.1):
             #print(n," ",l," ",j," ",n1," ",l1," ",j1)
-            return self.getRadialMatrixElement(n,l,j,n1,l1,j1)
+            if semi == False:
+                return self.getRadialMatrixElement(n,l,j,n1,l1,j1,s)
+            else:
+                return self.getRadialMatrixElementSemiClassical(n,l,j,n1,l1,j1)
         elif (dl==0 or dl==1 or dl==2) and(abs(j-j1)<2.1):
             # quadrupole coupling
             #return 0.
-            return self.getQuadrupoleMatrixElement(n,l,j,n1,l1,j1)
+            return self.getQuadrupoleMatrixElement(n,l,j,n1,l1,j1,s)
         else:
             # neglect octopole coupling and higher
             #print("NOTE: Neglecting couplings higher then quadrupole")
@@ -1712,7 +1858,7 @@ def NumerovBack(innerLimit,outerLimit,kfun,step,init1,init2):
     return rad,sol
 
 
-def _atomLightAtomCoupling(n,l,j,nn,ll,jj,n1,l1,j1,n2,l2,j2,atom):
+def _atomLightAtomCoupling(n,l,j,nn,ll,jj,n1,l1,j1,n2,l2,j2,atom,s=0.5,semi = True):
     """
         Calculates radial part of atom-light coupling
 
@@ -1741,8 +1887,8 @@ def _atomLightAtomCoupling(n,l,j,nn,ll,jj,n1,l1,j1,n2,l2,j2,atom):
     else:
         return False
 
-    radial1 = atom.getRadialCoupling(n,l,j,n1,l1,j1)
-    radial2 = atom.getRadialCoupling(nn,ll,jj,n2,l2,j2)
+    radial1 = atom.getRadialCoupling(n,l,j,n1,l1,j1,s,semi)
+    radial2 = atom.getRadialCoupling(nn,ll,jj,n2,l2,j2,s,semi)
 
     ## TO-DO: check exponent of the Boht radius (from where it comes?!)
 
@@ -1876,14 +2022,14 @@ def loadSavedCalculation(fileName):
 # =================== State generation and printing (START) ===================
 
 def singleAtomState(j,m):
-    a = np.zeros((int(round(2.0*j+1.0,0)),1),dtype=np.complex128)
+    a = zeros((int(round(2.0*j+1.0,0)),1),dtype=np.complex128)
     a[int(round(j+m,0))] = 1
     return a
     return csr_matrix(([1], ([j+m], [0])),
                                        shape=(round(2.0*j+1.0,0),1))
 
 def compositeState(s1,s2):
-    a = np.zeros((s1.shape[0]*s2.shape[0],1),dtype=np.complex128)
+    a = zeros((s1.shape[0]*s2.shape[0],1),dtype=np.complex128)
     index = 0
     for br1 in xrange(s1.shape[0]):
         for br2 in xrange(s2.shape[0]):
@@ -1891,7 +2037,7 @@ def compositeState(s1,s2):
             index += 1
     return a
 
-def printState(n,l,j):
+def printState(n,l,j,s=0.5):
     """
         Prints state spectroscopic label for numeric :math:`n`,
         :math:`l`, :math:`s` label of the state
@@ -1901,10 +2047,12 @@ def printState(n,l,j):
             l (int): orbital angular momentum
             j (float): total angular momentum
     """
-
-    print(n," ",printStateLetter(l),(" %.0d/2" % (j*2)))
-
-def printStateString(n,l,j):
+    if(j % 1 !=0 ):
+        print( str(n)+" "+printStateLetter(l)+(" %.0d/2" % (j*2)))
+    else:
+        print( str(n)+" "+(" %.0d " % (2*s+1))+printStateLetter(l)+(" %.0d" % (j)))
+    return
+def printStateString(n,l,j,s=0.5):
     """
         Returns state spectroscopic label for numeric :math:`n`,
         :math:`l`, :math:`s` label of the state
@@ -1917,10 +2065,11 @@ def printStateString(n,l,j):
         Returns:
             string: label for the state in standard spectroscopic notation
     """
-
-    return str(n)+" "+printStateLetter(l)+(" %.0d/2" % (j*2))
-
-def printStateStringLatex(n,l,j):
+    if(j % 1 !=0 ):
+        return str(n)+" "+printStateLetter(l)+(" %.0d/2" % (j*2))
+    else:
+        return str(n)+" "+(" %.0d " % (2*s+1))+printStateLetter(l)+(" %.0d" % (j))
+def printStateStringLatex(n,l,j,s=0.5):
     """
         Returns latex code for spectroscopic label for numeric :math:`n`,
         :math:`l`, :math:`s` label of the state
@@ -1933,8 +2082,10 @@ def printStateStringLatex(n,l,j):
         Returns:
             string: label for the state in standard spectroscopic notation
     """
-
-    return str(n)+printStateLetter(l)+("_{%.0d/2}" % (j*2))
+    if(j % 1 !=0 ):
+        return str(n)+printStateLetter(l)+("_{%.0d/2}" % (j*2))
+    else:
+        return str(n)+" "+(" {%.0d}^" % (2*s+1))+printStateLetter(l)+("_{%.0d}" % (j))
 
 def printStateLetter(l):
     let = ''

@@ -1,7 +1,7 @@
-from __future__ import print_function,  absolute_import
+from __future__ import print_function
 
 import numpy as np
-from .alkali_atom_functions import printStateString,C_e,C_h,pi
+from alkali_atom_functions import printStateString,C_e,C_h,pi
 
 
 def htmlLiteratureOutput(v,ref):
@@ -103,8 +103,8 @@ def plotStarkMap(calc,units=1,xlim=[],ylim=[],filename=""):
         coeff = 0.03336 # conversion factor from GHz to cm^{-1}
         ax.ylabel = "Energy/(h c) (cm^{-1})"
     if (ylim == []):
-        ylim = [calc.atom.getEnergy(n,l,j)*C_e/C_h*1e-9*coeff-10,\
-                calc.atom.getEnergy(n,l,j)*C_e/C_h*1e-9*coeff+10]
+        ylim = [calc.atom.getEnergy(n,l,j)*C_e/h*1e-9*coeff-10,\
+                calc.atom.getEnergy(n,l,j)*C_e/h*1e-9*coeff+10]
 
     for br in xrange(len(calc.y)):
         for i in xrange(len(calc.y[br])):

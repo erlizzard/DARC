@@ -6,3 +6,6 @@ from __future__ import division, print_function, absolute_import
 from .alkali_atom_data import *
 from .calculations_atom_single import *
 from .calculations_atom_pairstate import *
+from .earth_alkali_atom_data import *
+from .alkali_earth_alkali_interactions import *
+from .calculations_alkali_earth_atom_pairstate import *
