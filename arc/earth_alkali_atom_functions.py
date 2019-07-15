@@ -313,9 +313,9 @@ class EarthAlkaliAtom(AlkaliAtom):
         elif((n>=self.minQuantumDefectN[term]) and\
                                 (n<=self.maxQuantumDefectN[term] or (self.extrapolate_data ==True and n>self.maxQuantumDefectN[term] ))):
             #print('got here',n,self.NISTdataLevels[term]+5, self.maxQuantumDefectN[term])
-            if(n>self.maxQuantumDefectN[term]):
+            #if(n>self.maxQuantumDefectN[term]):
                 #LIZZY SORT OUT THIS WARNING PROPERLY
-                print("CAUTION: The Rydberg-Ritz values have been extrapolated beyond their fitted values")
+            #    print("CAUTION: The Rydberg-Ritz values have been extrapolated beyond their fitted values")
             defect = self.getQuantumDefect(n, L,S,J)
             return - self.scaledRydbergConstant//219475/((n-defect)**2)# self.scaledRydbergConstant
         else:
@@ -403,7 +403,7 @@ class EarthAlkaliAtom(AlkaliAtom):
 
         return defect
 
-    def getRadialCoupling(self,n,l,s,j,n1,l1,s1,j1):
+    def getRadialCoupling(self,n,l,j,n1,l1,j1,s,semi):
         """
             Returns radial part of the coupling between two states (dipole and
             quadrupole interactions only)
@@ -425,7 +425,7 @@ class EarthAlkaliAtom(AlkaliAtom):
         dl = abs(l-l1)
         if (dl == 1 and abs(j-j1)<1.1):
             #print(n," ",l," ",j," ",n1," ",l1," ",j1)
-            return self.getRadialMatrixElementSemiClassical(n,l,s,j,n1,l1,s1,j1)
+            return self.getRadialMatrixElement(n,l,s,j,n1,l1,s,j1)
         elif (dl==0 or dl==1 or dl==2) and(abs(j-j1)<2.1):
             # quadrupole coupling
             return 0.

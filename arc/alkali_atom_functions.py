@@ -1889,7 +1889,6 @@ def _atomLightAtomCoupling(n,l,j,nn,ll,jj,n1,l1,j1,n2,l2,j2,atom,s=0.5,semi = Tr
 
     radial1 = atom.getRadialCoupling(n,l,j,n1,l1,j1,s,semi)
     radial2 = atom.getRadialCoupling(nn,ll,jj,n2,l2,j2,s,semi)
-
     ## TO-DO: check exponent of the Boht radius (from where it comes?!)
 
     coupling = C_e**2/(4.0*pi*epsilon_0)*radial1*radial2*\

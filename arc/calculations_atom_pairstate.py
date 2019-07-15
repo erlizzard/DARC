@@ -463,11 +463,13 @@ class PairStateInteractions:
             print(sys.exc_info())
 
 
-    def __isCoupled(self,n,l,j,nn,ll,jj,n1,l1,j1,n2,l2,j2,limit):
-        if (abs(self.atom.getEnergyDefect2(n,l,j,nn,ll,jj,n1,l1,j1,n2,l2,j2))/C_h<limit) and\
+    def __isCoupled(self,n,l,j,nn,ll,jj,n1,l1,j1,n2,l2,j2,limit,s = 0.5):
+        #LIZZY: what is the point of this, surely we know the coupling by
+        # allowing the user to input the interactionUpTo?s
+        if (abs(self.atom.getEnergyDefect2(n,l,j,nn,ll,jj,n1,l1,j1,n2,l2,j2,s))/C_h<limit) and\
                 not (n==n1 and nn==n2 and l==l1 and ll==l2 and j==j1 and jj==j2) \
-                and not ((abs(l1-l)!=1 and abs(j-0.5)<0.1 and abs(j1-0.5)<0.1) or
-                         (abs(l2-ll)!=1 and abs(jj-0.5)<0.1 and abs(j2-0.5)<0.1)):
+                and not ((abs(l1-l)!=1 and abs(j-s)<0.1 and abs(j1-s)<0.1) or
+                         (abs(l2-ll)!=1 and abs(jj-s)<0.1 and abs(j2-s)<0.1)):
                             # determine coupling
                 dl = abs(l-l1)
                 dj = abs(j-j1)
@@ -525,19 +527,19 @@ class PairStateInteractions:
                     l2max = max(ll+self.interactionsUpTo,lrange)+1
                     l2max = min(l2max,n2-1)
                     for l2 in xrange(l2start,l2max):
-                        j1 = l1-0.5
+                        j1 = l1-self.s
                         if l1 == 0:
-                            j1 = 0.5
-                        while j1 <= l1+0.5+0.1:
-                            j2 = l2-0.5
+                            j1 = self.s
+                        while j1 <= l1+self.s+0.1:
+                            j2 = l2-self.s
                             if l2 == 0:
-                                j2 = 0.5
+                                j2 = self.s
 
-                            while j2 <= l2+0.5+0.1:
+                            while j2 <= l2+self.s+0.1:
                                 ed = self.atom.getEnergyDefect2(n,l,j,\
                                                                nn,ll,jj,\
                                                                n1,l1,j1,\
-                                                               n2,l2,j2)/C_h
+                                                               n2,l2,j2,self.s)/C_h
                                 if  (abs(ed)<limit  \
                                     and (not (self.interactionsUpTo==1) or\
                                          (Lmod2 == ((l1+l2)%2) ) )
@@ -545,11 +547,12 @@ class PairStateInteractions:
                                          (j1+j2+0.1>self.m1+self.m2) )    ):
 
                                     if debugOutput:
-                                        pairState = "|"+printStateString(n1,l1,j1)+\
-                                                ","+printStateString(n2,l2,j2)+">"
+                                        pairState = "|"+printStateString(n1,l1,j1,self.s)+\
+                                                ","+printStateString(n2,l2,j2,self.s)+">"
                                         print(pairState+("\t EnergyDefect = %.3f GHz" % (ed*1.e-9)))
 
-                                    states.append([n1,l1,j1,n2,l2,j2])
+                                    #LIZZY: this has been edited so that the 7th element is the spin for both
+                                    states.append([n1,l1,j1,n2,l2,j2,self.s])
 
 
                                     if (n==n1 and nn==n2 and l==l1 and\
@@ -570,12 +573,16 @@ class PairStateInteractions:
                                   for i in xrange(2*self.interactionsUpTo-1) ]
 
         # original pair-state (i.e. target pair state) Zeeman Shift
-        opZeemanShift = (self.atom.getZeemanEnergyShift(
-                              self.l, self.j, self.m1,
-                              self.Bz) + \
-                         self.atom.getZeemanEnergyShift(
-                              self.ll, self.jj, self.m2,
-                              self.Bz)) / C_h * 1.0e-9  # in GHz
+        #LIZZY We need to see if this is correct first before trusting the result 
+        #opZeemanShift = (self.atom.getZeemanEnergyShift(
+        #                      self.l, self.j, self.m1,
+        #                      self.Bz) + \
+        #                 self.atom.getZeemanEnergyShift(
+        #                      self.ll, self.jj, self.m2,
+        #                      self.Bz)) / C_h * 1.0e-9  # in GHz
+                                        
+        #temp
+        opZeemanShift =0
 
         if debugOutput:
             print("\n ======= Coupling strengths (radial part only) =======\n")
@@ -591,20 +598,24 @@ class PairStateInteractions:
             ed =  self.atom.getEnergyDefect2(states[opi][0],states[opi][1],states[opi][2],
                                           states[opi][3],states[opi][4],states[opi][5],
                                           states[i][0],states[i][1],states[i][2],
-                                          states[i][3],states[i][4],states[i][5]) / C_h * 1.0e-9\
+                                          states[i][3],states[i][4],states[i][5],states[i][6]) / C_h * 1.0e-9\
                  - opZeemanShift
 
-            pairState1 = "|"+printStateString(states[i][0],states[i][1],states[i][2])+\
-                        ","+printStateString(states[i][3],states[i][4],states[i][5])+">"
-
+            pairState1 = "|"+printStateString(states[i][0],states[i][1],states[i][2],states[i][6])+\
+                        ","+printStateString(states[i][3],states[i][4],states[i][5],states[i][6])+">"
+            #LIZZY: this means that the indexing of th energy defect in the 
+            #function which calls this will have changed, TODO [6] -> [7]
+            # states = [n,l,j,n1,l1,j1,s,ed]
             states[i].append(ed)  # energy defect of given state
 
             for j in xrange(i+1,dimension):
-
+                
+                #Work out if these states are coupled and by which means they are coupled?
+                #Returns false if not coupled 2 if dipole dipole, 3 if quad- dipole, and 4 for quad-quad
                 coupled = self.__isCoupled(states[i][0],states[i][1],states[i][2],
                                             states[i][3],states[i][4],states[i][5],
                                             states[j][0],states[j][1],states[j][2],
-                                             states[j][3],states[j][4],states[j][5], limit)
+                                             states[j][3],states[j][4],states[j][5], limit, states[i][6])
 
                 if (states[i][0]==24 and states[j][0]==18):
                     print("\n")
@@ -612,18 +623,19 @@ class PairStateInteractions:
                     print(states[j])
                     print(coupled)
 
-
+                #if there is some coupling and the ns are within k range
                 if coupled and (abs(states[i][0]-states[j][0])<=k and\
                                 abs(states[i][3]-states[j][3])<=k ):
-                    pairState2 = "|"+printStateString(states[j][0],states[j][1],states[j][2])+\
-                                ","+printStateString(states[j][3],states[j][4],states[j][5])+">"
+                    pairState2 = "|"+printStateString(states[j][0],states[j][1],states[j][2],states[j][6])+\
+                                ","+printStateString(states[j][3],states[j][4],states[j][5],states[j][6])+">"
                     if debugOutput:
                         print(pairState1+" <---> "+pairState2)
 
+                    #work out the coupling strength between the two. 
                     couplingStregth = _atomLightAtomCoupling(states[i][0],states[i][1],states[i][2],
                                             states[i][3],states[i][4],states[i][5],
                                             states[j][0],states[j][1],states[j][2],
-                                             states[j][3],states[j][4],states[j][5],self.atom,True)/C_h*1.0e-9
+                                             states[j][3],states[j][4],states[j][5],self.atom,states[j][6],True)/C_h*1.0e-9
 
                     couplingMatConstructor[coupled-2][0].append(couplingStregth)
                     couplingMatConstructor[coupled-2][1].append(i)
@@ -895,10 +907,11 @@ class PairStateInteractions:
                                                 #    angularFactor = d
                                                 #else:
                                                 angularFactor = conjugate(stateCom2.T).dot(d.dot(stateCom))
-                
+                                                #print('angualar factor, coupling strength', angularFactor, couplingStregth)
                                                 angularFactor = real(angularFactor[0,0])
                                                 C6 += -((couplingStregth*angularFactor)**2/getEnergyDefect)
-
+                                print(C6)
+                                print()
                                 j2 = j2+1.0
                             j1 = j1+1.0
 
@@ -1041,7 +1054,7 @@ class PairStateInteractions:
                            for i in xrange(self.interactionsUpTo*2-1) ]
 
         matRIndex = 0
-        #coupling 
+        #coupling csr matrixces
         for c in self.coupling:
             progress = 0.
             for ii in xrange(len(self.channel)):
@@ -1053,7 +1066,8 @@ class PairStateInteractions:
                                                    ii+1,len(self.channel)))
                     sys.stdout.flush()
 
-                ed = self.channel[ii][6]
+                #LIZZY index change from 6 to 7
+                ed = self.channel[ii][7]
 
                 # solves problems with exactly degenerate basisStates
                 degeneracyOffset = 0.00000001
@@ -1130,6 +1144,9 @@ class PairStateInteractions:
                                 matRConstructor[matRIndex][0].append(radialPart*angularFactor)
                                 matRConstructor[matRIndex][1].append(j)
                                 matRConstructor[matRIndex][2].append(i)
+                    print(matRConstructor)
+                    print(len(matRConstructor), len(matRConstructor[0]))
+                    print()
             matRIndex += 1
             if progressOutput or debugOutput:
                 print("\n")
