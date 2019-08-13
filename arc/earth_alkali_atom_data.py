@@ -58,6 +58,14 @@ class StrontiumI(EarthAlkaliAtom):
 
     ionisationEnergy = 5.69486740  #eV  ref. [#c3]
     ionisationEnergycm = 45932.2036 #cm-1  ref. [#c3]
+    
+    #need to reference James millesn thesis!
+    modelPotential_coef = {"1S0":[3.762,-6.33,1.07], "3S1":[2.93,-5.28,1.22], "1P1":[3.49,-1.86,1.10],\
+                           "3P2":[3.23,-6.20,1.19],"3P1":[3.35,-6.13,1.12], "3P0":[3.45,-6.02,-6.13],\
+                           "1D2":[2.78,-9.06,2.31],"3D3":[2.86,-9.71,2.20],"3D2":[3.12,-4.52,1.24],\
+                           "3D1":[3.41,-6.02,1.27],"1F3":[9.22,-6.35,1.00],"3F4":[1.18,-9.04,1.06],\
+                           "3F3":[1.18,-9.04,1.06],"3F2":[1.18,-9.04,1.06]}
+    
     Z = 38
     scaledRydbergConstant = 109736.627# cm-1 *1.e2\
         #*physical_constants["inverse meter-electron volt relationship"][0] # ref. [#c2]
@@ -69,8 +77,21 @@ class StrontiumI(EarthAlkaliAtom):
 
     NISTdataLevels = {"1S0":65,"3S1":45, "1P1":79,"3P2":55,"3P1":17, "3P0":10,"1D2":65,"3D3":41,"3D2":45,"3D1":46,"1F3":25,"3F4":24,"3F3":24,"3F2":24}
     level_labels = ["1S0","3S1", "1P1","3P2","3P1", "3P0","1D2","3D3","3D2","3D1","1F3","3F4","3F3","3F2"]
-    dataFolder = 'data/sr_data'
+    #dataFolder = 'data/sr_data'
     quantumDefectData ='quantum_defect.csv'
     groundStateN = 5
-    extraLevels = {"3D3":4, "3D1":4, "1F3":4, "3F4":4,"3F3":4, "3F2":4}
+    extraLevels = {"3D3":4, "3D1":4, "1F3":4, "3F4":4,"3F3":4, "3F2":4,"1D2":4}
     preferQuantumDefects = False
+    alphaC = 15
+
+    precalculatedDB = "sr_precalculated.db"
+
+    dipoleMatrixElementFile = "sr_dipole_matrix_elements.npy"
+    quadrupoleMatrixElementFile = "sr_quadrupole_matrix_elements.npy"
+
+    literatureDMEfilename = 'strontium_literature_dme.csv'
+    
+    useLiterature = False 
+    elementName = 'Strontium87'
+    #LIZZY FIND A CITATION FOR THIS 
+    mass = 87.62*physical_constants["atomic mass constant"][0]

@@ -83,7 +83,6 @@
     Module
     ------
 """
-
 from __future__ import division, print_function, absolute_import
 
 from .alkali_atom_functions import *

@@ -159,6 +159,7 @@ class AlkaliAtom(object):
     preferQuantumDefects = False
     minQuantumDefectN = 0  #: minimal quantum number for which quantum defects can be used; uses measured energy levels otherwise
 
+    semi= True
     # SQLite connection and cursor
     conn = False
     c = False
@@ -185,11 +186,13 @@ class AlkaliAtom(object):
                 data = np.load(os.path.join(self.dataFolder,\
                                             self.dipoleMatrixElementFile),\
                                encoding = 'latin1')
+                #print(data)
             except IOError as e:
                 print("Error reading dipoleMatrixElement File "+\
                     os.path.join(self.dataFolder,self.dipoleMatrixElementFile))
                 print(e)
         # save to SQLite database
+       
         try:
             self.c.execute('''SELECT COUNT(*) FROM sqlite_master
                             WHERE type='table' AND name='dipoleME';''')
@@ -198,13 +201,14 @@ class AlkaliAtom(object):
                 self.c.execute('''CREATE TABLE IF NOT EXISTS dipoleME
                  (n1 TINYINT UNSIGNED, l1 TINYINT UNSIGNED, j1_x2 TINYINT UNSIGNED,
                  n2 TINYINT UNSIGNED, l2 TINYINT UNSIGNED, j2_x2 TINYINT UNSIGNED,
-                 dme DOUBLE,
-                 PRIMARY KEY (n1,l1,j1_x2,n2,l2,j2_x2)
+                 dme DOUBLE, s TINYINT UNSIGNED, semi TINYINT UNSIGNED,
+                 PRIMARY KEY (n1,l1,j1_x2,n2,l2,j2_x2,s,semi)
                 ) ''')
                 if (len(data)>0):
-                    self.c.executemany('INSERT INTO dipoleME VALUES (?,?,?,?,?,?,?)', data)
+                    self.c.executemany('INSERT INTO dipoleME VALUES (?,?,?,?,?,?,?,?,?)', data)
                 self.conn.commit()
         except sqlite3.Error as e:
+            print('here')
             print("Error while loading precalculated values into the database")
             print(e)
             exit()
@@ -232,11 +236,11 @@ class AlkaliAtom(object):
                 self.c.execute('''CREATE TABLE IF NOT EXISTS quadrupoleME
                  (n1 TINYINT UNSIGNED, l1 TINYINT UNSIGNED, j1_x2 TINYINT UNSIGNED,
                  n2 TINYINT UNSIGNED, l2 TINYINT UNSIGNED, j2_x2 TINYINT UNSIGNED,
-                 qme DOUBLE,
-                 PRIMARY KEY (n1,l1,j1_x2,n2,l2,j2_x2)
+                 qme DOUBLE, s TINYINT UNSIGNED
+                 PRIMARY KEY (n1,l1,j1_x2,n2,l2,j2_x2,s)
                 ) ''')
                 if (len(data)>0):
-                    self.c.executemany('INSERT INTO quadrupoleME VALUES (?,?,?,?,?,?,?)', data)
+                    self.c.executemany('INSERT INTO quadrupoleME VALUES (?,?,?,?,?,?,?,?)', data)
                 self.conn.commit()
         except sqlite3.Error as e:
             print("Error while loading precalculated values into the database")
@@ -264,7 +268,7 @@ class AlkaliAtom(object):
                 br = br+1
 
         # read Literature values for dipole matrix elements
-        self._readLiteratureValues()
+        #self._readLiteratureValues()
 
         return
 
@@ -349,6 +353,7 @@ class AlkaliAtom(object):
             Returns:
                 float: effective charge (in a.u.)
          """
+
         return 1.0+(self.Z-1)*exp(-self.a1[l]*r)-r*(self.a3[l]+self.a4[l]*r)*exp(-self.a2[l]*r)
 
 
@@ -545,7 +550,7 @@ class AlkaliAtom(object):
 
         return (C_h*C_c)/((self.getEnergy(n2, l2, j2, s)-self.getEnergy(n1, l1, j1, s))*C_e)
 
-    def getTransitionFrequency(self,n1,l1,j1,n2,l2,j2):
+    def getTransitionFrequency(self,n1,l1,j1,n2,l2,j2,s=0.5):
         """
             Calculated transition frequency in Hz
 
@@ -566,7 +571,7 @@ class AlkaliAtom(object):
                     level from which we are going is **above** the level to which we are
                     going.
         """
-        return (self.getEnergy(n2, l2, j2)-self.getEnergy(n1, l1, j1))*C_e/C_h
+        return (self.getEnergy(n2, l2, j2,s)-self.getEnergy(n1, l1, j1,s))*C_e/C_h
 
 
     def getEnergy(self,n,l,j,s = 0.5):
@@ -626,7 +631,7 @@ class AlkaliAtom(object):
 
 
 
-    def getQuantumDefect(self,n,l,j):
+    def getQuantumDefect(self,n,l,j,s=0.5):
         """
             Quantum defect of the level.
 
@@ -664,92 +669,138 @@ class AlkaliAtom(object):
         return defect
 
     def getRadialMatrixElement(self,n1,l1,j1,n2,l2,j2,s= 0.5,useLiterature=True):
-        """
-            Radial part of the dipole matrix element
-
-            Calculates :math:`\\int \\mathbf{d}r~R_{n_1,l_1,j_1}(r)\cdot \
-                R_{n_1,l_1,j_1}(r) \cdot r^3`.
-
-            Args:
-                n1 (int): principal quantum number of state 1
-                l1 (int): orbital angular momentum of state 1
-                j1 (float): total angular momentum of state 1
-                n2 (int): principal quantum number of state 2
-                l2 (int): orbital angular momentum of state 2
-                j2 (float): total angular momentum of state 2
-
-            Returns:
-                float: dipole matrix element (:math:`a_0 e`).
-        """
-        dl = abs(l1-l2)
-        dj = abs(j2-j2)
-        if not(dl==1 and (dj<1.1)):
+        if (n1 == n2 and l1 == l2 and j1 == j2):
+            #if we are dipole coupling the same states then we return 0
             return 0
-
-        if (self.getEnergy(n1, l1, j1)>self.getEnergy(n2, l2, j2)):
-            temp = n1
-            n1 = n2
-            n2 = temp
-            temp = l1
-            l1 = l2
-            l2 = temp
-            temp = j1
-            j1 = j2
-            j2 = temp
-
-        n1 = int(n1)
-        n2 = int(n2)
-        l1 = int(l1)
-        l2 = int(l2)
-        j1_x2 = int(round(2*j1))
-        j2_x2 = int(round(2*j2))
-
-        if useLiterature:
-            # is there literature value for this DME? If there is, use the best one (smalles error)
-            self.c.execute('''SELECT dme FROM literatureDME WHERE
-             n1= ? AND l1 = ? AND j1_x2 = ? AND
-             n2 = ? AND l2 = ? AND j2_x2 = ?
-             ORDER BY errorEstimate ASC''',(n1,l1,j1_x2,n2,l2,j2_x2))
-            answer = self.c.fetchone()
-            if (answer):
-                # we did found literature value
-                return answer[0]
-
-
-        # was this calculated before? If it was, retrieve from memory
-        self.c.execute('''SELECT dme FROM dipoleME WHERE
-         n1= ? AND l1 = ? AND j1_x2 = ? AND
-         n2 = ? AND l2 = ? AND j2_x2 = ?''',(n1,l1,j1_x2,n2,l2,j2_x2))
-        dme = self.c.fetchone()
-        if (dme):
-            return dme[0]
-
-        step = 0.001
-        r1,psi1_r1 = self.radialWavefunction(l1,s,j1,\
-                                               self.getEnergy(n1, l1, j1,s)/27.211,\
-                                               self.alphaC**(1/3.0),\
-                                                2.0*n1*(n1+15.0), step)
-        r2,psi2_r2 = self.radialWavefunction(l2,s,j2,\
-                                               self.getEnergy(n2, l2, j2,s)/27.211,\
-                                               self.alphaC**(1/3.0),\
-                                                2.0*n2*(n2+15.0), step)
-
-        upTo = min(len(r1),len(r2))
-
-        # note that r1 and r2 change in same staps, starting from the same value
-        dipoleElement = np.trapz(np.multiply(np.multiply(psi1_r1[0:upTo],psi2_r2[0:upTo]),\
-                                           r1[0:upTo]), x = r1[0:upTo])
-
-        self.c.execute(''' INSERT INTO dipoleME VALUES (?,?,?, ?,?,?, ?)''',\
-                       [n1,l1,j1_x2,n2,l2,j2_x2, dipoleElement] )
-        self.conn.commit()
-
-        return dipoleElement
-
-    def getRadialMatrixElementSemiClassical(self,n,l,j,n1,l1,j1):
+        else:
+            if self.semi ==False:
+            
+                """
+                    Radial part of the dipole matrix element
+        
+                    Calculates :math:`\\int \\mathbf{d}r~R_{n_1,l_1,j_1}(r)\cdot \
+                        R_{n_1,l_1,j_1}(r) \cdot r^3`.
+        
+                    Args:
+                        n1 (int): principal quantum number of state 1
+                        l1 (int): orbital angular momentum of state 1
+                        j1 (float): total angular momentum of state 1
+                        n2 (int): principal quantum number of state 2
+                        l2 (int): orbital angular momentum of state 2
+                        j2 (float): total angular momentum of state 2
+        
+                    Returns:
+                        float: dipole matrix element (:math:`a_0 e`).
+                """
+                semi = 0
+                
+                dl = abs(l1-l2)
+                dj = abs(j2-j2)
+                if not(dl==1 and (dj<1.1)):
+                    return 0
+        
+                if (self.getEnergy(n1, l1, j1,s)>self.getEnergy(n2, l2, j2,s)):
+                    temp = n1
+                    n1 = n2
+                    n2 = temp
+                    temp = l1
+                    l1 = l2
+                    l2 = temp
+                    temp = j1
+                    j1 = j2
+                    j2 = temp
+        
+                n1 = int(n1)
+                n2 = int(n2)
+                l1 = int(l1)
+                l2 = int(l2)
+                j1_x2 = int(round(2*j1))
+                j2_x2 = int(round(2*j2))
+        
+                if useLiterature:
+                    # is there literature value for this DME? If there is, use the best one (smalles error)
+                    self.c.execute('''SELECT dme FROM literatureDME WHERE
+                     n1= ? AND l1 = ? AND j1_x2 = ? AND
+                     n2 = ? AND l2 = ? AND j2_x2 = ? AND
+                     s = ?
+                     ORDER BY errorEstimate ASC''',(n1,l1,j1_x2,n2,l2,j2_x2,s))
+                    answer = self.c.fetchone()
+                    if (answer):
+                        # we did found literature value
+                        return answer[0]
+        
+        
+                # was this calculated before? If it was, retrieve from memory
+                self.c.execute('''SELECT dme FROM dipoleME WHERE
+                 n1= ? AND l1 = ? AND j1_x2 = ? AND
+                 n2 = ? AND l2 = ? AND j2_x2 = ? AND
+                 s = ? AND semi = ?''',(n1,l1,j1_x2,n2,l2,j2_x2,s,semi))
+                dme = self.c.fetchone()
+                if (dme):
+                    return dme[0]
+        
+                #LIZZY TEMP
+                step = 0.001
+                r1,psi1_r1 = self.radialWavefunction(l1,s,j1,\
+                                                       self.getEnergy(n1, l1, j1,s)/27.211,\
+                                                       self.alphaC**(1/3.0),\
+                                                        2.0*n1*(n1+15.0), step)
+                r2,psi2_r2 = self.radialWavefunction(l2,s,j2,\
+                                                       self.getEnergy(n2, l2, j2,s)/27.211,\
+                                                       self.alphaC**(1/3.0),\
+                                                        2.0*n2*(n2+15.0), step)
+        
+                upTo = min(len(r1),len(r2))
+        
+                # note that r1 and r2 change in same staps, starting from the same value
+                dipoleElement = np.trapz(np.multiply(np.multiply(psi1_r1[0:upTo],psi2_r2[0:upTo]),\
+                                                   r1[0:upTo]), x = r1[0:upTo])
+        
+                self.c.execute(''' INSERT INTO dipoleME VALUES (?,?,?, ?,?,?, ?,?,?)''',\
+                               [n1,l1,j1_x2,n2,l2,j2_x2, dipoleElement,s,semi] )
+                self.conn.commit()
+        
+                return dipoleElement
+            else:
+                semi = 1
+                if useLiterature:
+                    # is there literature value for this DME? If there is, use the best one (smalles error)
+                    self.c.execute('''SELECT dme FROM literatureDME WHERE
+                     n1= ? AND l1 = ? AND j1_x2 = ? AND
+                     n2 = ? AND l2 = ? AND j2_x2 = ? AND
+                     s = ? AND semi = ?
+                     ORDER BY errorEstimate ASC''',(n1,l1,j1_x2,n2,l2,j2_x2,s,semi))
+                    answer = self.c.fetchone()
+                    if (answer):
+                        # we did found literature value
+                        return answer[0]
+        
+        
+                # was this calculated before? If it was, retrieve from memory
+                self.c.execute('''SELECT dme FROM dipoleME WHERE
+                 n1= ? AND l1 = ? AND j1_x2 = ? AND
+                 n2 = ? AND l2 = ? AND j2_x2 = ? AND
+                 s = ? AND semi = ?''',(n1,l1,j1_x2,n2,l2,j2_x2,s,semi))
+                dme = self.c.fetchone()
+                if (dme):
+                    return dme[0]
+                #print('Using the semiclassical approch to calculating the Radial Matrix element!')
+                dipoleElement = self.getRadialMatrixElementSemiClassical(n1,l1,j1, n2, l2, j2, s)
+                
+                self.c.execute(''' INSERT INTO dipoleME VALUES (?,?,?, ?,?,?, ?,?,?)''',\
+                               [n1,l1,j1_x2,n2,l2,j2_x2, dipoleElement,s,semi] )
+                self.conn.commit()
+                return dipoleElement
+                    
+    def getRadialWavefunctionLaguerre(n,l,j,s):
+        #this will return the hydrogen form of the radial 
+        #wavefunction calculated using the laguerre polynomial.
+        return
+    def getRadialMatrixElementSemiClassical(self,n,l,j,n1,l1,j1, s=0.5):
         #get the effective principal number of both states
-        nu = n - self.getQuantumDefect(n,l,j)
-        nu1 = n1 - self.getQuantumDefect(n1,l1,j1)
+        nu = n - self.getQuantumDefect(n,l,j,s)
+        nu1 = n1 - self.getQuantumDefect(n1,l1,j1,s)
+        
 
         #get the parameters required to calculate the sum
         l_c = (l+l1+1.)/2.
@@ -757,7 +808,10 @@ class AlkaliAtom(object):
 
         delta_nu = nu- nu1
         delta_l = l1 -l
-
+        
+        #I am not sure if this correct 
+        if delta_nu ==0:
+            return 0
         gamma  = (delta_l*l_c)/nu_c
 
         g0 = (1./(3.*delta_nu))*(mpmath.angerj(delta_nu-1.,-delta_nu) - mpmath.angerj(delta_nu+1,-delta_nu))
@@ -769,6 +823,45 @@ class AlkaliAtom(object):
 
         return radial_ME
 
+    def getQuadrupoleMatrixElementSemiClassical(self,n,l,j,n1,l1,j1, s=0.5):#
+        dl = abs(l-l1)
+
+        
+        nu = n - self.getQuantumDefect(n,l,j,s)
+        nu1 = n1 - self.getQuantumDefect(n1,l1,j1,s)
+
+        #get the parameters required to calculate the sum
+        l_c = (l+l1+1.)/2.
+        nu_c = sqrt(nu*nu1)
+
+        delta_nu = nu- nu1
+        delta_l = l1 -l
+
+        gamma  = (delta_l*l_c)/nu_c
+        
+        g0 = (1./(3.*delta_nu))*(mpmath.angerj(delta_nu-1.,-delta_nu) - mpmath.angerj(delta_nu+1,-delta_nu))
+        g1 = -(1./(3.*delta_nu))*(mpmath.angerj(delta_nu-1.,-delta_nu) + mpmath.angerj(delta_nu+1,-delta_nu))
+        
+        
+        q = np.zeros((4,))
+        q[0] = -(6./(5.*delta_nu**2))*g1
+        q[1] = -(6./(5.*delta_nu))*g0 + (6./5.)*np.sin((pi*delta_nu))/(pi*delta_nu**2)
+        q[2] = -(3./4.)*(6./(5.*delta_nu) *g1 +g0)
+        q[3] = 0.5*(delta_nu*0.5*q[0] +q[1])
+        
+        sm = 0
+        
+        if dl ==0:
+            quadrupoleElement = (5./2.)*nu_c**4*(1.-(3.*l_c**2)/(5*nu_c**2))
+            for p in range(0,2,1):
+                sm += gamma**(2*p)*q[2*p]
+            return quadrupoleElement*sm
+        
+        elif dl == 2:
+            quadrupoleElement = (5./2.)*nu_c**4*(1-(l_c +1)**2/(nu_c**2))**0.5* (1-(l_c +2)**2/(nu_c**2))**0.5
+            for p in range(0,4):
+                sm += gamma**(p)*q[p]
+            return quadrupoleElement*sm
 
     def getQuadrupoleMatrixElement(self,n1,l1,j1,n2,l2,j2,s = 0.5):
         """
@@ -792,66 +885,69 @@ class AlkaliAtom(object):
             Returns:
                 float: quadrupole matrix element (:math:`a_0^2 e`).
         """
-
         dl = abs(l1-l2)
         dj = abs(j1-j2)
-        if not ((dl==0 or dl==2 or dl==1)and (dj<2.1)):
-            return 0
 
-        if (self.getEnergy(n1, l1, j1,s)>self.getEnergy(n2, l2, j2,s)):
-            temp = n1
-            n1 = n2
-            n2 = temp
-            temp = l1
-            l1 = l2
-            l2 = temp
-            temp = j1
-            j1 = j2
-            j2 = temp
-
-        n1 = int(n1)
-        n2 = int(n2)
-        l1 = int(l1)
-        l2 = int(l2)
-        j1_x2 = int(round(2*j1))
-        j2_x2 = int(round(2*j2))
-
-        # was this calculated before? If yes, retrieve from memory.
-        self.c.execute('''SELECT qme FROM quadrupoleME WHERE
-         n1= ? AND l1 = ? AND j1_x2 = ? AND
-         n2 = ? AND l2 = ? AND j2_x2 = ?''',(n1,l1,j1_x2,n2,l2,j2_x2))
-        qme = self.c.fetchone()
-        if (qme):
-            return qme[0]
-
-        # if it wasn't, calculate now
-
-        step = 0.001
-        r1, psi1_r1 = self.radialWavefunction(l1,s,j1,\
-                                               self.getEnergy(n1, l1, j1,s)/27.211,\
-                                               self.alphaC**(1/3.0), \
-                                               2.0*n1*(n1+15.0), step)
-        r2, psi2_r2 = self.radialWavefunction(l2,0.5,j2,\
-                                               self.getEnergy(n2, l2, j2,s)/27.211,\
-                                               self.alphaC**(1/3.0), \
-                                               2.0*n2*(n2+15.0), step)
-
-        upTo = min(len(r1),len(r2))
-
-        # note that r1 and r2 change in same staps, starting from the same value
-        quadrupoleElement = np.trapz(np.multiply(np.multiply(psi1_r1[0:upTo],psi2_r2[0:upTo]),\
-                                               np.multiply(r1[0:upTo],r1[0:upTo])),\
-                                     x = r1[0:upTo])
-
-
-
-        self.c.execute(''' INSERT INTO quadrupoleME VALUES (?,?,?, ?,?,?, ?)''',\
-                       [n1,l1,j1_x2,n2,l2,j2_x2, quadrupoleElement] )
-        self.conn.commit()
-
-        return quadrupoleElement
-
-
+        if self.semi == False:
+            if not ((dl==0 or dl==2 or dl==1)and (dj<2.1)):
+                return 0
+    
+            if (self.getEnergy(n1, l1, j1,s)>self.getEnergy(n2, l2, j2,s)):
+                temp = n1
+                n1 = n2
+                n2 = temp
+                temp = l1
+                l1 = l2
+                l2 = temp
+                temp = j1
+                j1 = j2
+                j2 = temp
+    
+            n1 = int(n1)
+            n2 = int(n2)
+            l1 = int(l1)
+            l2 = int(l2)
+            j1_x2 = int(round(2*j1))
+            j2_x2 = int(round(2*j2))
+    
+            # was this calculated before? If yes, retrieve from memory.
+            self.c.execute('''SELECT qme FROM quadrupoleME WHERE
+             n1= ? AND l1 = ? AND j1_x2 = ? AND
+             n2 = ? AND l2 = ? AND j2_x2 = ? AND s = ?''',(n1,l1,j1_x2,n2,l2,j2_x2,s))
+            qme = self.c.fetchone()
+            if (qme):
+                return qme[0]
+    
+            # if it wasn't, calculate now
+    
+            step = 0.001
+            print(s)
+            r1, psi1_r1 = self.radialWavefunction(l1,s,j1,\
+                                                   self.getEnergy(n1, l1, j1,s)/27.211,\
+                                                   self.alphaC**(1/3.0), \
+                                                   2.0*n1*(n1+15.0), step)
+            r2, psi2_r2 = self.radialWavefunction(l2,s,j2,\
+                                                   self.getEnergy(n2, l2, j2,s)/27.211,\
+                                                   self.alphaC**(1/3.0), \
+                                                   2.0*n2*(n2+15.0), step)
+    
+            upTo = min(len(r1),len(r2))
+    
+            # note that r1 and r2 change in same staps, starting from the same value
+            quadrupoleElement = np.trapz(np.multiply(np.multiply(psi1_r1[0:upTo],psi2_r2[0:upTo]),\
+                                                   np.multiply(r1[0:upTo],r1[0:upTo])),\
+                                         x = r1[0:upTo])
+    
+    
+    
+            self.c.execute(''' INSERT INTO quadrupoleME VALUES (?,?,?, ?,?,?, ?,?)''',\
+                           [n1,l1,j1_x2,n2,l2,j2_x2, quadrupoleElement,s] )
+            self.conn.commit()
+    
+            return quadrupoleElement
+        else: 
+            return self.getQuadrupoleMatrixElementSemiClassical(n1,l1,j1,n2,l2,j2,s)
+           
     def getReducedMatrixElementJ_asymmetric(self,n1,l1,j1,n2,l2,j2):
         """
             Reduced matrix element in :math:`J` basis, defined in asymmetric
@@ -904,7 +1000,7 @@ class AlkaliAtom(object):
                 sqrt(float(max(l1,l2))/(2.0*l1+1.0))*\
                 self.getRadialMatrixElement(n1, l1, j1, n2, l2, j2)
 
-    def getReducedMatrixElementL(self,n1,l1,j1,n2,l2,j2,semi):
+    def getReducedMatrixElementL(self,n1,l1,j1,n2,l2,j2,s=0.5):
         """
             Reduced matrix element in :math:`L` basis (symmetric notation)
 
@@ -921,15 +1017,13 @@ class AlkaliAtom(object):
                     reduced dipole matrix element in :math:`L` basis
                     :math:`\\langle l || er || l' \\rangle` (:math:`a_0 e`).
         """
-        if semi ==True:
-            r = self.getRadialMatrixElementSemiClassical(n1, l1, j1, n2, l2, j2)
-        else:
-            r=  self.getRadialMatrixElement(n1, l1, j1, n2, l2, j2)
+     
+        r=  self.getRadialMatrixElement(n1, l1, j1, n2, l2, j2,s)
 
         return (-1)**l1*sqrt((2.0*l1+1.0)*(2.0*l2+1.0))*\
                 Wigner3j(l1,1,l2,0,0,0)*r
 
-    def getReducedMatrixElementJ(self,n1,l1,j1,n2,l2,j2,semi):
+    def getReducedMatrixElementJ(self,n1,l1,j1,n2,l2,j2,s=0.5):
         """
             Reduced matrix element in :math:`J` basis (symmetric notation)
 
@@ -949,10 +1043,10 @@ class AlkaliAtom(object):
 
         return (-1)**(int(l1+0.5+j2+1.))*sqrt((2.*j1+1.)*(2.*j2+1.))*\
                 Wigner6j(j1, 1., j2, l2, 0.5, l1)*\
-                self.getReducedMatrixElementL(n1,l1,j1,n2,l2,j2,semi)
+                self.getReducedMatrixElementL(n1,l1,j1,n2,l2,j2,s)
 
 
-    def getDipoleMatrixElement(self,n1,l1,j1,mj1,n2,l2,j2,mj2,q,semi):
+    def getDipoleMatrixElement(self,n1,l1,j1,mj1,n2,l2,j2,mj2,q,s=0.5):
         """
             Dipole matrix element
             :math:`\\langle n_1 l_1 j_1 m_{j_1} |e\\mathbf{r}|n_2 l_2 j_2 m_{j_2}\\rangle`
@@ -979,9 +1073,9 @@ class AlkaliAtom(object):
             return 0
         return (-1)**(int(j1-mj1))*\
                 Wigner3j(j1, 1, j2, -mj1, -q, mj2)*\
-                self.getReducedMatrixElementJ(n1,l1,j1,n2,l2,j2,semi)
+                self.getReducedMatrixElementJ(n1,l1,j1,n2,l2,j2,s)
 
-    def getRabiFrequency(self,n1,l1,j1,mj1,n2,l2,j2,q,laserPower,laserWaist):
+    def getRabiFrequency(self,n1,l1,j1,mj1,n2,l2,j2,q,laserPower,laserWaist,s=0.5):
         """
             Returns a Rabi frequency for resonantly driven atom in a
             center of TEM00 mode of a driving field
@@ -1002,9 +1096,9 @@ class AlkaliAtom(object):
         """
         maxIntensity = 2*laserPower/(pi* laserWaist**2)
         electricField = sqrt(2.*maxIntensity/(C_c*epsilon_0))
-        return self.getRabiFrequency2(n1,l1,j1,mj1,n2,l2,j2,q,electricField)
+        return self.getRabiFrequency2(n1,l1,j1,mj1,n2,l2,j2,q,electricField,s)
 
-    def getRabiFrequency2(self,n1,l1,j1,mj1,n2,l2,j2,q,electricFieldAmplitude):
+    def getRabiFrequency2(self,n1,l1,j1,mj1,n2,l2,j2,q,electricFieldAmplitude,s=0.5):
         """
             Returns a Rabi frequency for resonant excitation with a given
             electric field amplitude
@@ -1024,7 +1118,7 @@ class AlkaliAtom(object):
         mj2 = mj1+q
         if abs(mj2)-0.1>j2:
             return 0
-        dipole = self.getDipoleMatrixElement(n1,l1,j1,mj1,n2,l2,j2,mj2,q)*\
+        dipole = self.getDipoleMatrixElement(n1,l1,j1,mj1,n2,l2,j2,mj2,q,s)*\
                 C_e*physical_constants["Bohr radius"][0]
         freq = electricFieldAmplitude*abs(dipole)/hbar
         return freq
@@ -1195,22 +1289,7 @@ class AlkaliAtom(object):
                                      self.getEnergy(n2,l2,j2)-\
                                      2*self.getEnergy(n,l,j)))
 
-    def getDoubleRadialMESemiClassical(self,n,l,j,n1,l1,j1,n2,l2,j2):
-        d1 = self.getRadialMatrixElementSemiClassical(n,l,j,n1,l1,j1)
-        d2 = self.getRadialMatrixElementSemiClassical(n,l,j,n2,l2,j2)
-        #d1d2 = 1/(4.0*pi*epsilon_0)*d1*d2*C_e**2*\
-        #        (physical_constants["Bohr radius"][0])**2
-        d1d2 = d1*d2
-        return -d1d2**2#
-
-    def getDoubleRadialME(self,n,l,j,n1,l1,j1,n2,l2,j2):
-        d1 = self.getRadialMatrixElement(n,l,j,n1,l1,j1)
-        d2 = self.getRadialMatrixElement(n,l,j,n2,l2,j2)
-        #d1d2 = 1/(4.0*pi*epsilon_0)*d1*d2*C_e**2*\
-        #        (physical_constants["Bohr radius"][0])**2
-        d1d2 = d1*d2
-
-        return -d1d2**2
+    
     def getC3term(self,n,l,j,n1,l1,j1,n2,l2,j2):
         """
             C3 interaction term for the given two pair-states
@@ -1295,8 +1374,8 @@ class AlkaliAtom(object):
             Returns:
                 float:  energy defect (SI units: J)
         """
-        return C_e*(self.getEnergy(n1,l1,j1,s)+self.getEnergy(n2,l2,j2,s)-\
-                           self.getEnergy(n,l,j,s)-self.getEnergy(nn,ll,jj,s))
+        return (self.getEnergy(n1,l1,j1,s)+self.getEnergy(n2,l2,j2,s)-\
+                           self.getEnergy(n,l,j,s)-self.getEnergy(nn,ll,jj,s))*C_e
 
     def updateDipoleMatrixElementsFile(self):
         """
@@ -1484,7 +1563,7 @@ class AlkaliAtom(object):
 
         return 1./transitionRate
 
-    def getRadialCoupling(self,n,l,j,n1,l1,j1,s,semi):
+    def getRadialCoupling(self,n,l,j,n1,l1,j1,s=0.5):
         """
             Returns radial part of the coupling between two states (dipole and
             quadrupole interactions only)
@@ -1506,15 +1585,11 @@ class AlkaliAtom(object):
 
         # LIZZY We currently don't have the radial model potetnial working yet
         #so if it is strontium then we have to use the semiClassical
-        if s == 1:
-            semi == True
 
         if (dl == 1 and abs(j-j1)<1.1):
             #print(n," ",l," ",j," ",n1," ",l1," ",j1)
-            if semi == False:
-                return self.getRadialMatrixElement(n,l,j,n1,l1,j1,s)
-            else:
-                return self.getRadialMatrixElementSemiClassical(n,l,j,n1,l1,j1)
+            return self.getRadialMatrixElement(n,l,j,n1,l1,j1,s)
+           
         elif (dl==0 or dl==1 or dl==2) and(abs(j-j1)<2.1):
             # quadrupole coupling
             #return 0.
@@ -1539,6 +1614,9 @@ class AlkaliAtom(object):
     def _readLiteratureValues(self):
         # clear previously saved results, since literature file
         # might have been updated in the meantime
+        
+        #Lizzy GOING TO HAVE TO SORT THIS OUT PROPERLY
+        
         self.c.execute('''DROP TABLE IF EXISTS literatureDME''')
         self.c.execute('''SELECT COUNT(*) FROM sqlite_master
                         WHERE type='table' AND name='literatureDME';''')
@@ -1547,7 +1625,7 @@ class AlkaliAtom(object):
             self.c.execute('''CREATE TABLE IF NOT EXISTS literatureDME
              (n1 TINYINT UNSIGNED, l1 TINYINT UNSIGNED, j1_x2 TINYINT UNSIGNED,
              n2 TINYINT UNSIGNED, l2 TINYINT UNSIGNED, j2_x2 TINYINT UNSIGNED,
-             dme DOUBLE,
+             dme DOUBLE, s TINYINT UNSIGNED,
              typeOfSource TINYINT,
              errorEstimate DOUBLE,
              comment TINYTEXT,
@@ -1555,7 +1633,7 @@ class AlkaliAtom(object):
              refdoi TINYTEXT
             );''')
             self.c.execute('''CREATE INDEX compositeIndex
-            ON literatureDME (n1,l1,j1_x2,n2,l2,j2_x2); ''')
+            ON literatureDME (n1,l1,j1_x2,n2,l2,j2_x2,s); ''')
         self.conn.commit()
 
         if (self.literatureDMEfilename == ""):
@@ -1612,7 +1690,7 @@ class AlkaliAtom(object):
             try:
                 self.c.executemany('''INSERT INTO literatureDME
                                     VALUES (?,?,?,?,?,?,?,
-                                            ?,?,?,?,?)''',\
+                                            ?,?,?,?,?,?)''',\
                                      literatureDME)
                 self.conn.commit()
             except sqlite3.Error as e:
@@ -1630,7 +1708,7 @@ class AlkaliAtom(object):
 
 
 
-    def getLiteratureDME(self,n1,l1,j1,n2,l2,j2):
+    def getLiteratureDME(self,n1,l1,j1,n2,l2,j2,s =0.5):
         """
             Returns literature information on requested transition.
 
@@ -1647,7 +1725,7 @@ class AlkaliAtom(object):
                     element was found and reduced DME in J basis is returned
                     as the number. Third returned argument (array) contains
                     additional information about the literature value in the
-                    following order [ typeOfSource, errorEstimate , comment ,
+                    following order [ typeOfSource, errorEstimate , comment ,Fge
                     reference, reference DOI] upon success to
                     find a literature value for dipole matrix element:
                         * typeOfSource=1 if the value is theoretical calculation;\
@@ -1689,7 +1767,7 @@ class AlkaliAtom(object):
 
         """
 
-        if (self.getEnergy(n1, l1, j1)>self.getEnergy(n2, l2, j2)):
+        if (self.getEnergy(n1, l1, j1,s)>self.getEnergy(n2, l2, j2,s)):
             temp = n1
             n1 = n2
             n2 = temp
@@ -1712,9 +1790,9 @@ class AlkaliAtom(object):
                      ref,
                      refdoi FROM literatureDME WHERE
                      n1= ? AND l1 = ? AND j1_x2 = ? AND
-                     n2 = ? AND l2 = ? AND j2_x2 = ?
+                     n2 = ? AND l2 = ? AND j2_x2 = ?,s =?
                      ORDER BY errorEstimate ASC''',\
-                     (n1,l1,j1_x2,n2,l2,j2_x2))
+                     (n1,l1,j1_x2,n2,l2,j2_x2,s))
         answer = self.c.fetchone()
         if (answer):
             # we did found literature value
@@ -1858,7 +1936,7 @@ def NumerovBack(innerLimit,outerLimit,kfun,step,init1,init2):
     return rad,sol
 
 
-def _atomLightAtomCoupling(n,l,j,nn,ll,jj,n1,l1,j1,n2,l2,j2,atom,s=0.5,semi = True):
+def _atomLightAtomCoupling(n,l,j,nn,ll,jj,n1,l1,j1,n2,l2,j2,atom,s=0.5):
     """
         Calculates radial part of atom-light coupling
 
@@ -1887,12 +1965,14 @@ def _atomLightAtomCoupling(n,l,j,nn,ll,jj,n1,l1,j1,n2,l2,j2,atom,s=0.5,semi = Tr
     else:
         return False
 
-    radial1 = atom.getRadialCoupling(n,l,j,n1,l1,j1,s,semi)
-    radial2 = atom.getRadialCoupling(nn,ll,jj,n2,l2,j2,s,semi)
+    radial1 = atom.getRadialCoupling(n,l,j,n1,l1,j1,s)
+    radial2 = atom.getRadialCoupling(nn,ll,jj,n2,l2,j2,s)
     ## TO-DO: check exponent of the Boht radius (from where it comes?!)
 
+    
     coupling = C_e**2/(4.0*pi*epsilon_0)*radial1*radial2*\
                 (physical_constants["Bohr radius"][0])**(c1+c2)
+    #coupling= radial1*radial2
     return coupling
 
 
@@ -1911,7 +1991,9 @@ def saveCalculation(calculation,fileName):
 
     Args:
         calculation: class instance of calculations (instance of
-            :obj:`calculations_atom_pairstate.PairStateInteractions`
+            :obj:`calculations_atom_pairstate.PairStateInteractions`c in xcoords:
+    plt.axvline(x=xc)
+
             or :obj:`calculations_atom_single.StarkMap`)
             to be saved.
         fileName: name of the file where calculation will be saved
@@ -2084,7 +2166,7 @@ def printStateStringLatex(n,l,j,s=0.5):
     if(j % 1 !=0 ):
         return str(n)+printStateLetter(l)+("_{%.0d/2}" % (j*2))
     else:
-        return str(n)+" "+(" {%.0d}^" % (2*s+1))+printStateLetter(l)+("_{%.0d}" % (j))
+        return str(n)+" "+(" ^{%.0d}" % (2*s+1))+printStateLetter(l)+("_{%.0d}" % (j))
 
 def printStateLetter(l):
     let = ''
@@ -2121,9 +2203,10 @@ def printStateLetter(l):
 class _EFieldCoupling:
     dataFolder = DPATH
 
-    def __init__(self, theta=0., phi=0.):
+    def __init__(self, theta=0., phi=0.,s =0.5):
         self.theta = theta
         self.phi = phi
+        self.s =s
 
         # STARK memoization
         self.conn = sqlite3.connect(os.path.join(self.dataFolder,\
@@ -2140,8 +2223,8 @@ class _EFieldCoupling:
             self.c.execute('''CREATE TABLE IF NOT EXISTS eFieldCoupling_angular
              (l1 TINYINT UNSIGNED, j1_x2 TINYINT UNSIGNED, j1_mj1 TINYINT UNSIGNED,
               l2 TINYINT UNSIGNED, j2_x2 TINYINT UNSIGNED, j2_mj2 TINYINT UNSIGNED,
-             sumPart DOUBLE,
-             PRIMARY KEY (l1,j1_x2,j1_mj1,l2,j2_x2,j2_mj2)
+             sumPart DOUBLE,s TINYINT UNSIGNED,
+             PRIMARY KEY (l1,j1_x2,j1_mj1,l2,j2_x2,j2_mj2,s)
             ) ''')
             self.conn.commit()
 
@@ -2156,23 +2239,24 @@ class _EFieldCoupling:
             self.c.execute('''CREATE TABLE IF NOT EXISTS eFieldCoupling
              (l1 TINYINT UNSIGNED, j1_x2 TINYINT UNSIGNED, j1_mj1 TINYINT UNSIGNED,
               l2 TINYINT UNSIGNED, j2_x2 TINYINT UNSIGNED, j2_mj2 TINYINT UNSIGNED,
-             coupling DOUBLE,
-             PRIMARY KEY (l1,j1_x2,j1_mj1,l2,j2_x2,j2_mj2)
+             coupling DOUBLE, s TINYINT UNSIGNED,
+             PRIMARY KEY (l1,j1_x2,j1_mj1,l2,j2_x2,j2_mj2,s)
             ) ''')
             self.conn.commit()
 
-    def getAngular(self,l1,j1,mj1,l2,j2,mj2):
+    def getAngular(self,l1,j1,mj1,l2,j2,mj2,s = 0.5):
         self.c.execute('''SELECT sumPart FROM eFieldCoupling_angular WHERE
          l1= ? AND j1_x2 = ? AND j1_mj1 = ? AND
-         l2 = ? AND j2_x2 = ? AND j2_mj2 = ?
-         ''',(l1,2*j1,j1+mj1,l2,j2*2,j2+mj2))
+         l2 = ? AND j2_x2 = ? AND j2_mj2 = ? AND s = ?
+         ''',(l1,2*j1,j1+mj1,l2,j2*2,j2+mj2,s))
         answer = self.c.fetchone()
         if (answer):
             return answer[0]
 
+        #have just rep;aced all 0.5 with self.s, if we need to change it back we can 
         # calulates sum (See PRA 20:2251 (1979), eq.(10))
         sumPart = 0.
-        ml = mj1 + 0.5
+        ml = mj1 + self.s
         if (abs(ml)-0.1<l1)and(abs(ml)-0.1<l2):
 
             angularPart = 0.
@@ -2181,35 +2265,36 @@ class _EFieldCoupling:
             elif(abs(l1-l2+1)<0.1):
                 angularPart = ((l2**2-ml**2)/((2.*l2+1.)*(2.*l2-1.)))**0.5
 
-            sumPart += CG(l1,ml,0.5,mj1-ml,j1,mj1)*CG(l2,ml,0.5,mj1-ml,j2,mj2)*\
+            sumPart += CG(l1,ml,self.s,mj1-ml,j1,mj1)*CG(l2,ml,self.s,mj1-ml,j2,mj2)*\
                         angularPart
 
-
-        ml = mj1 - 0.5
-        if (abs(ml)-0.1<l1)and(abs(ml)-0.1<l2):
-            angularPart = 0.
-            if (abs(l1-l2-1)<0.1):
-                angularPart = ((l1**2-ml**2)/((2.*l1+1.)*(2.*l1-1.)))**0.5
-            elif(abs(l1-l2+1)<0.1):
-                angularPart = ((l2**2-ml**2)/((2.*l2+1.)*(2.*l2-1.)))**0.5
-            sumPart += CG(l1,ml,0.5,mj1-ml,j1,mj1)*CG(l2,ml,0.5,mj1-ml,j2,mj2)*\
-                        angularPart
+        #LIZZY maybe we should not do this if we are s = 0
+        if self.s !=0:
+            ml = mj1 - self.s
+            if (abs(ml)-0.1<l1)and(abs(ml)-0.1<l2):
+                angularPart = 0.
+                if (abs(l1-l2-1)<0.1):
+                    angularPart = ((l1**2-ml**2)/((2.*l1+1.)*(2.*l1-1.)))**0.5
+                elif(abs(l1-l2+1)<0.1):
+                    angularPart = ((l2**2-ml**2)/((2.*l2+1.)*(2.*l2-1.)))**0.5
+                sumPart += CG(l1,ml,self.s,mj1-ml,j1,mj1)*CG(l2,ml,self.s,mj1-ml,j2,mj2)*\
+                            angularPart
 
         self.c.execute(''' INSERT INTO eFieldCoupling_angular
-                            VALUES (?,?,?, ?,?,?, ?)''',\
-                            [l1,2*j1,j1+mj1,l2,j2*2,j2+mj2,sumPart] )
+                            VALUES (?,?,?, ?,?,?, ?,?)''',\
+                            [l1,2*j1,j1+mj1,l2,j2*2,j2+mj2,sumPart,s] )
         self.conn.commit()
 
         return sumPart
 
-    def getCouplingDivEDivDME(self,l1,j1,mj1,l2,j2,mj2):
+    def getCouplingDivEDivDME(self,l1,j1,mj1,l2,j2,mj2, s=0.5):
         # returns angular coupling without radial part and electric field
 
         # if calculated before, retrieve from memory
         self.c.execute('''SELECT coupling FROM eFieldCoupling WHERE
          l1= ? AND j1_x2 = ? AND j1_mj1 = ? AND
-         l2 = ? AND j2_x2 = ? AND j2_mj2 = ?
-         ''',(l1,2*j1,j1+mj1,l2,j2*2,j2+mj2))
+         l2 = ? AND j2_x2 = ? AND j2_mj2 = ?, s = ?
+         ''',(l1,2*j1,j1+mj1,l2,j2*2,j2+mj2,s))
         answer = self.c.fetchone()
         if (answer):
             return answer[0]
@@ -2237,8 +2322,8 @@ class _EFieldCoupling:
         ## save in memory for later use
 
         self.c.execute(''' INSERT INTO eFieldCoupling
-                            VALUES (?,?,?, ?,?,?, ?)''',\
-                            [l1,2*j1,j1+mj1,l2,j2*2,j2+mj2,coupling] )
+                            VALUES (?,?,?, ?,?,?, ?,?)''',\
+                            [l1,2*j1,j1+mj1,l2,j2*2,j2+mj2,coupling,s] )
         self.conn.commit()
 
         # return result

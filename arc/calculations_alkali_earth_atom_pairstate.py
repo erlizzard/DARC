@@ -8,6 +8,9 @@ import scipy
 import sys
 import inspect, os #for obtaining current file's path
 np.set_printoptions(threshold=sys.maxsize)
+#from .earth_alkali_atom_functions import EarthAlkaliAtom
+from .earth_alkali_atom_data import StrontiumI
+
 
 class EarthAlkaliPairstateInteraction:
 
@@ -55,15 +58,24 @@ class EarthAlkaliPairstateInteraction:
 
         return common
     def getC6term(self,n1,l1,s1,j1,m1_ini, m1_fini, n2,l2,s2,j2, m2_ini,m2_fini, n1_p,l1_p,s1_p, j1_p, m1_p, n2_p,l2_p, s2_p,j2_p,m2_p, theta, phi):
+        
+        print('n,l,j,m', n1,l1,j1, m1_ini)
+        print('nn,ll,jj,mm',n2,l2,j2,m2_ini)
+        print('n1,l1,j1,m1', n1_P,l1_p,j1_p,m1_fini)
+        print('n2,l2,j2,m2', n1,L2_i,J2_i,M2b)
+    
+          
+        forster_defect = E(n1_i, L1_i, J1_i, S) + E(n2_i, L2_i, J2_i, S) - E(n1, L1, J1, S) - E(n2, L2, J2, S)
+       
         #radial matrix element
         rad = (self.atom.getRadialMatrixElement(n1,l1,s1,j1,n1_p,l1_p,s1_p,j1_p)*self.atom.getRadialMatrixElement(n2,l2,s2,j2,n2_p,l2_p,s2_p,j2_p))**2
         #angular part for the first atom and intermeidate state
-        rad *= self.atom.getAngularMatrixElementSrSr( l1_p, s1_p, j1_p, m1_p, l2_p, s2_p, j2_p, m2_p,l1,s1,j1,m1_ini,l2,s2,j2,m2_ini, theta, phi )
+        rad *= self.atom.getAngularMatrixElementSrSr( l1_p, j1_p, m1_p, l2_p, j2_p, m2_p,l1,j1,m1_ini,l2,j2,m2_ini,s1,1,1 ,theta, phi )
         #print('Angular Part1', self.atom.getAngularMatrixElementSrSr( l1_p, s1_p, j1_p, m1_p, l2_p, s2_p, j2_p, m2_p,l1,s1,j1,m1_ini,l2,s2,j2,m2_ini, theta, phi ))
          #angular part for the second atom and
-        rad *= self.atom.getAngularMatrixElementSrSr( l1, s1, j1, m1_fini, l2, s2, j2, m2_fini, l1_p, s1_p, j1_p, m1_p, l2_p, s2_p, j2_p, m2_p,theta, phi)
+        rad *= self.atom.getAngularMatrixElementSrSr( l1, j1, m1_fini, l2, j2, m2_fini, l1_p, j1_p, m1_p, l2_p, j2_p, m2_p,s1,1,1,theta, phi)
 
-        return rad/(self.atom.getEnergyDefect2(n1,l1,s1,j1,n2,l2,s2,j2,n1_p,l1_p,s1_p,j1_p, n2_p, l2_p, s2_p, j2_p )/2) #times 2 because of au being 2Rb
+        return rad/(self.atom.getEnergyDefect2(n1,l1,j1,n2,l2,j2,n1_p,l1_p,j1_p, n2_p, l2_p, j2_p, s1 )/2) #times 2 because of au being 2Rb
     def getC6Matrix(self,n,l,s,j,n1,l1,s1,j1,theta,phi):
         dim = (2*j1 +1)*(2*j+1)
         mat = np.zeros((dim,dim), dtype = 'complex')
@@ -85,6 +97,8 @@ class EarthAlkaliPairstateInteraction:
         elif j==2: #e.g. 3D2
             symindices = [[0,0],[1,1],[1,2],[3,3],[3,4],[3,5],[4,4],[6,6],[6,7],[6,8],[6,9],\
             [7,7],[7,9],[10,10],[10,11],[10,12],[10,13],[10,14],[11,11],[11,12],[11,13],[12,12]]
+
+        if(s ==0 and j == 0 ): symindices= [[0,0]]
 
         #my code again
         for i,k in symindices:
@@ -156,21 +170,22 @@ class EarthAlkaliPairstateInteraction:
         csvname = '%.4f,%.4f' %(theta,phi)
 
         #different computers have different slashes in paths...
-        if os.name=='posix':#mac - my laptop
-            slash = '/'
-        elif os.name=='nt':#windows - library
-            slash='\\'#double \\ so I don't confuse Python with my syntax
-        fullpath = '%s%s%s%s%s.csv' %(pathup,slash,filename,slash,csvname)
+        #if os.name=='posix':#mac - my laptop
+        #    slash = '/'
+        #elif os.name=='nt':#windows - library
+        #    slash='\\'#double \\ so I don't confuse Python with my syntax
+        #fullpath = '%s%s%s%s%s.csv' %(pathup,slash,filename,slash,csvname)
 
-        print(fullpath)
-        if os.path.exists(fullpath)==False:#only save if this file doesn't exist
+        #print(fullpath)
+        #if os.path.exists(fullpath)==False:#only save if this file doesn't exist
             #this avoids clearing data by accident
-            with open(fullpath, 'xb') as f:
-                np.savetxt(f, mat, delimiter=",")
-        return mat
+        #    with open(fullpath, 'xb') as f:
+        #        np.savetxt(f, mat, delimiter=",")
+        #return mat
 
     def getEigenVals(self, n,l,s,j, n1,l1,s1,j1 ,theta, phi):
         print('Running')
         mat = self.getC6Matrix(n,l,s,j,n1,l1,s1,j1,theta,phi)
         print('Finishing Matrix')
         return np.linalg.eigvals(mat)
+#print(EarthAlkaliPairstateInteraction(StrontiumI()).getEigenVals(50,0,0,0,50,0,0,0,0,0))

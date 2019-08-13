@@ -70,6 +70,7 @@ from .alkali_atom_functions import *
 from .alkali_atom_functions import _EFieldCoupling,_atomLightAtomCoupling
 from .calculations_atom_single import StarkMap
 from .earth_alkali_atom_functions import EarthAlkaliAtom
+import itertools
 
 from matplotlib.colors import LinearSegmentedColormap
 import matplotlib
@@ -160,7 +161,7 @@ class PairStateInteractions:
 
     # =============================== Methods ===============================
 
-    def __init__(self,atom,n,l,j,nn,ll,jj,m1,m2,s=0.5,interactionsUpTo=1):
+    def __init__(self,atom,n,l,j,nn,ll,jj,m1,m2,s=0.5,interactionsUpTo=1,m1f = 0, m2f = 0):
         # alkali atom type, principal quantum number, orbital angular momentum,
         #  total angular momentum projections of the angular momentum on z axis
         self.atom = atom  #: atom type
@@ -174,6 +175,9 @@ class PairStateInteractions:
         self.m2 = m2 #: pair-state definition: projection of the total angular momentum for the *second* atom
         self.s = s #: spin of both atoms
         self.interactionsUpTo = interactionsUpTo
+        self.m1f = m1f
+        self.m2f = m2f
+        
         """"
             Specifies up to which approximation we include in pair-state interactions.
             By default value is 1, corresponding to pair-state interactions up to
@@ -301,22 +305,23 @@ class PairStateInteractions:
                      CG(jj,mm,c2,-p,j2,m2)
         return elem*sumPol
 
-    def _getAngularMatrixElementEarthAlkali(self,l,j,m,ll,jj,mm,l1,j1,m1,l2,j2,m2, c1, c2, s,theta, phi):
-        return self.atom.getAngularMatrixElementSrSr(l,j,m,ll,jj,mm,l1,j1,m1,l2,j2,m2,c1,c2,s,theta, phi)
+    def _getAngularMatrixElementEarthAlkali(self,l,j,m,ll,jj,mm,l1,j1,m1,l2,j2,m2, c1, c2, s):
+        return self.atom.getAngularMatrixElementSrSr(l,j,m,ll,jj,mm,l1,j1,m1,l2,j2,m2,c1,c2,s)
 
-    def __getAngularMatrix_M(self,l,j,ll,jj,l1,j1,l2,j2,atom,phi,theta):
+    def __getAngularMatrix_M(self,l,j,ll,jj,l1,j1,l2,j2,atom):
         # did we already calculated this matrix?
+        self.c.execute('''SELECT ind FROM pair_angularMatrix WHERE
+             l1 = ? AND j1_x2 = ? AND
+             l2 = ? AND j2_x2 = ? AND
 
-        #self.c.execute('''SELECT ind FROM pair_angularMatrix WHERE
-        #     l1 = ? AND j1_x2 = ? AND
-        #     l2 = ? AND j2_x2 = ? AND
-        #     l3 = ? AND j3_x2 = ? AND
-        #     l4 = ? AND j4_x2 = ?
-        #     ''',(l,j*2,ll,jj*2,l1,j1*2,l2,j2*2))
+             l3 = ? AND j3_x2 = ? AND
+             l4 = ? AND j4_x2 = ? AND 
+             s  = ?
+             ''',(l,j*2,ll,jj*2,l1,j1*2,l2,j2*2, self.s*2))
 
-#        index = self.c.fetchone()
-#        if (index):
-#            return self.savedAngularMatrix_matrix[index[0]]
+        index = self.c.fetchone()
+        if (index):
+            return np.array(self.savedAngularMatrix_matrix[index[0]])
 
         # determine coupling
         dl = abs(l-l1)
@@ -360,22 +365,19 @@ class PairStateInteractions:
                         # we have chosen the second index
                         index2 = int(round(m*(2.0*jj+1.0)+mm+(j*(2.0*jj+1.0)+jj),0))
                         if issubclass(type(self.atom), EarthAlkaliAtom):
-                            am[index1,index2] = real(self._getAngularMatrixElementEarthAlkali(l,j,m,ll,jj,mm,l1,j1,m1,l2,j2,m2,self.s ,c1, c2,phi,theta))
+                            am[index1,index2] = real(self._getAngularMatrixElementEarthAlkali(l1,j1,m1,l2,j2,m2,l,j,m,ll,jj,mm,self.s ,c1, c2))
                         else:
-                            am[index1,index2] = self._getAngularMatrixElementElkali(l,j,m,ll,jj,mm,l1,j1,m1,l2,j2,m2, c1, c2)
+                            am[index1,index2] = self._getAngularMatrixElementAlkali(l,j,m,ll,jj,mm,l1,j1,m1,l2,j2,m2, c1, c2)
 
 
-        #index = len(self.savedAngularMatrix_matrix)
+        index = len(self.savedAngularMatrix_matrix)
+        self.c.execute(''' INSERT INTO pair_angularMatrix
+                            VALUES (?,?, ?,?, ?,?, ?,?, ?,?)''',\
+                       (l,j*2,ll,jj*2,l1,j1*2,l2,j2*2, index, self.s*2) )
+        self.conn.commit()
+        self.savedAngularMatrix_matrix.append(am)
 
-        #self.c.execute(''' INSERT INTO pair_angularMatrix
-        #                    VALUES (?,?, ?,?, ?,?, ?,?, ?)''',\
-        #               (l,j*2,ll,jj*2,l1,j1*2,l2,j2*2,index) )
-        #self.conn.commit()
-
-        #self.savedAngularMatrix_matrix.append(am)
-
-        #self.savedAngularMatrixChanged = True
-
+        self.savedAngularMatrixChanged = True
         return am
 
     def __updateAngularMatrixElementsFile(self):
@@ -394,7 +396,7 @@ class PairStateInteractions:
             data[:,3] /= 2.  # 2 r j2 -> j2
             data[:,5] /= 2.  # 2 r j3 -> j3
             data[:,7] /= 2.  # 2 r j4 -> j4
-
+            data[:,9] /= 2.
 
             fileHandle = gzip.GzipFile(os.path.join(self.dataFolder,\
                                                     self.angularMatrixFile_meta), 'wb')
@@ -429,18 +431,17 @@ class PairStateInteractions:
         data[:,3] *= 2  # j2 -> 2 r j2
         data[:,5] *= 2  # j3 -> 2 r j3
         data[:,7] *= 2  # j4 -> 2 r j4
-
+        data[:,9] *= 2  
         data = np.array(np.rint(data),dtype=np.int)
-
         try:
 
             self.c.executemany('''INSERT INTO pair_angularMatrix
                 (l1, j1_x2 ,
                  l2 , j2_x2 ,
                  l3, j3_x2,
-                 l4 , j4_x2 ,
-                 ind)
-                      VALUES (?,?,?,?,?,?,?,?,?)''', data)
+                 l4 , j4_x2,
+                 ind,s)
+                      VALUES (?,?,?,?,?,?,?,?,?,?)''', data)
 
             self.conn.commit()
 
@@ -499,6 +500,7 @@ class PairStateInteractions:
                          progressOutput = False,debugOutput=False):
         # limit = limit in Hz on energy defect
         # k defines range of n' = [n-k, n+k]
+        
         dimension = 0
 
         # which states/channels contribute significantly in the second order perturbation?
@@ -635,9 +637,9 @@ class PairStateInteractions:
                     couplingStregth = _atomLightAtomCoupling(states[i][0],states[i][1],states[i][2],
                                             states[i][3],states[i][4],states[i][5],
                                             states[j][0],states[j][1],states[j][2],
-                                             states[j][3],states[j][4],states[j][5],self.atom,states[j][6],True)/C_h*1.0e-9
+                                             states[j][3],states[j][4],states[j][5],self.atom,states[j][6])/C_h*1.0e-9
 
-                    couplingMatConstructor[coupled-2][0].append(couplingStregth)
+                    couplingMatConstructor[coupled-2][0].append(float(couplingStregth))
                     couplingMatConstructor[coupled-2][1].append(i)
                     couplingMatConstructor[coupled-2][2].append(j)
 
@@ -648,11 +650,12 @@ class PairStateInteractions:
                             "/R^",exponent," GHz  (mu m)^",exponent,"\n")
 
         # coupling = [1,1] dipole-dipole, [2,1]  quadrupole dipole, [2,2] quadrupole quadrupole
-
+        
+        length = len(couplingMatConstructor)
         couplingMatArray = [csr_matrix((couplingMatConstructor[i][0], \
                                 (couplingMatConstructor[i][1], couplingMatConstructor[i][2])),\
                                        shape=(dimension, dimension))\
-                    for i in xrange(len(couplingMatConstructor))]
+                    for i in xrange(length)]
         return states, couplingMatArray
 
 
@@ -669,14 +672,15 @@ class PairStateInteractions:
                             WHERE type='table' AND name='pair_angularMatrix';''')
         if (self.c.fetchone()[0] == 0):
             # create table
+            print('gothere')
             try:
                 self.c.execute('''CREATE TABLE IF NOT EXISTS pair_angularMatrix
                  (l1 TINYINT UNSIGNED, j1_x2 TINYINT UNSIGNED,
                  l2 TINYINT UNSIGNED, j2_x2 TINYINT UNSIGNED,
                  l3 TINYINT UNSIGNED, j3_x2 TINYINT UNSIGNED,
                  l4 TINYINT UNSIGNED, j4_x2 TINYINT UNSIGNED,
-                 ind INTEGER,
-                 PRIMARY KEY (l1,j1_x2, l2,j2_x2, l3,j3_x2, l4,j4_x2)
+                 ind INTEGER, s TINYINT UNSIGNED,
+                 PRIMARY KEY (l1,j1_x2, l2,j2_x2, l3,j3_x2, l4,j4_x2,s)
                 ) ''')
             except sqlite3.Error as e:
                 print(e)
@@ -689,6 +693,7 @@ class PairStateInteractions:
         self.conn.close()
         self.conn = False
         self.c = False
+
 
     def getLeRoyRadius(self):
         """
@@ -709,18 +714,18 @@ class PairStateInteractions:
                     http://www.nrcresearchpress.com/doi/abs/10.1139/p74-035
         """
         step = 0.001
-        r1,psi1_r1 = self.atom.radialWavefunction(self.l,0.5,self.j,\
-                                               self.atom.getEnergy(self.n, self.l, self.j)/27.211,\
-                                               self.atom.alphaC**(1/3.0),\
+        r1,psi1_r1 = self.atom.radialWavefunction(self.l,self.s,self.j,\
+                                               self.atom.getEnergy(self.n, self.l, self.j,self.s)/27.211,\
+                                               15**(1/3.0),\
                                                2.0*self.n*(self.n+15.0), step)
-
+        ###LIZZY :note temporary fix to the core polarizabilites
         sqrt_r1_on2 = np.trapz(np.multiply(np.multiply(psi1_r1,psi1_r1),\
                                                np.multiply(r1,r1)),\
                                      x = r1)
 
-        r2,psi2_r2 = self.atom.radialWavefunction(self.ll,0.5,self.jj,\
-                                               self.atom.getEnergy(self.nn, self.ll, self.jj)/27.211,\
-                                               self.atom.alphaC**(1/3.0),\
+        r2,psi2_r2 = self.atom.radialWavefunction(self.ll,self.s,self.jj,\
+                                               self.atom.getEnergy(self.nn, self.ll, self.jj,self.s)/27.211,\
+                                               15**(1/3.0),\
                                                2.0*self.nn*(self.nn+15.0), step)
 
         sqrt_r2_on2 = np.trapz(np.multiply(np.multiply(psi2_r2,psi2_r2),\
@@ -731,8 +736,16 @@ class PairStateInteractions:
 
         return 2.*(sqrt(sqrt_r1_on2)+sqrt(sqrt_r2_on2))\
                 *(physical_constants["Bohr radius"][0]*1.e6)
-
+                
+                
     def getC6perturbatively(self,theta,phi,nRange,energyDelta,semi):
+        if isinstance(self.atom, EarthAlkaliAtom):
+            return self._getC6perturbativelyEarthAlkali( self.m1, self.m2, self.m1f, self.m2f, theta, phi, nRange)
+
+        else:
+            return self._getC6perturbativelyAlkali(theta,phi,nRange,energyDelta,semi)
+        
+    def _getC6perturbativelyAlkali(self,theta,phi,nRange,energyDelta,semi):
         """
             Calculates :math:`C_6` from second order perturbation theory.
 
@@ -766,13 +779,15 @@ class PairStateInteractions:
                     between the original pair state and the other pair states that we are including in
                     calculation
 
-            Returns:
+            Returns:larFactor = d
+                                                #else:
                 float: :math:`C_6` measured in :math:`\\text{GHz }\\mu\\text{m}^6`
 
             Example:
                 If we want to quickly calculate :math:`C_6` for two Rubidium
                 atoms in state :math:`62 D_{3/2} m_j=3/2`, positioned in space
-                along the shared quantization axis::
+                along the shared quantization axis::    print('angular part', D11(L1, L2, J1, J2, M1a, M2a, L1_i, L2_i, J1_i, J2_i, M1_i, M2_i, S, theta, phi))
+
 
                     from arc import *
                     calculation = PairStateInteractions(Rubidium(), 62, 2, 1.5, 62, 2, 1.5, 1.5, 1.5)
@@ -805,11 +820,10 @@ class PairStateInteractions:
                     show()
 
         """
-        self.__initializeDatabaseForMemoization()
+        self.__initializeDatabaseForMemoization()    
 
         # ========= START OF THE MAIN CODE ===========
         C6 = 0.
-
         # wigner D matrix allows calculations with arbitrary orientation of
         # the two atoms
         wgd = wignerDmatrix(theta,phi)
@@ -818,13 +832,13 @@ class PairStateInteractions:
         statePart2 = singleAtomState(self.jj, self.m2)
         
         #wigner rotations are included in the calcuation of the matrix element
-        if not isinstance(self.atom,EarthAlkaliAtom):
+        #if not isinstance(self.atom,EarthAlkaliAtom):
         # rotate individual states
-            dMatrix = wgd.get(self.j)
-            statePart1 = dMatrix.dot(statePart1)
-    
-            dMatrix = wgd.get(self.jj)
-            statePart2 = dMatrix.dot(statePart2)
+        dMatrix = wgd.get(self.j)
+        statePart1 = dMatrix.dot(statePart1)
+
+        dMatrix = wgd.get(self.jj)
+        statePart2 = dMatrix.dot(statePart2)
         stateCom = compositeState(statePart1, statePart2)
 
         # any conservation?
@@ -843,7 +857,11 @@ class PairStateInteractions:
         lmin2 = self.ll-1
         if lmin2 < -0.1:
             lmin2 = 1
+        counter = 0
 
+        
+        
+        #getting the intermediate pairstates 
         for n1 in xrange(max(self.n-nRange,1),self.n+nRange+1):
             for n2 in xrange(max(self.nn-nRange,1),self.nn+nRange+1):
                 for l1 in xrange(lmin1,self.l+2,2):
@@ -858,10 +876,6 @@ class PairStateInteractions:
 
                             while j2 <= l2+self.s+0.1:
 
-                                print('n,l,j',self.n,self.l,self.j)
-                                print('nn,ll,jj',self.nn,self.ll,self.jj)
-                                print('n1,l1,j1',n1,l1,j1)
-                                print('n2,l2,j2',n2,l2,j2)
                                 getEnergyDefect = self.atom.getEnergyDefect2(self.n,self.l,self.j,\
                                                                   self.nn,self.ll,self.jj,\
                                                                   n1,l1,j1,\
@@ -875,51 +889,278 @@ class PairStateInteractions:
                                     couplingStregth = _atomLightAtomCoupling(self.n,self.l,self.j,
                                             self.nn,self.ll,self.jj,
                                             n1,l1,j1,
-                                            n2,l2,j2,self.atom,self.s)*(1.0e-9*(1.e6)**3/C_h) # GHz / mum^3
-
+                                            n2,l2,j2,self.atom,self.s)*(1.0e-9*(1.0e6)**3/C_h) # GHz / mum^3
 
                                     pairState2 = "|"+printStateString(n1,l1,j1,self.s)+\
                                         ","+printStateString(n2,l2,j2,self.s)+">"
 
-                                    # include relevant mj and add contributions
+                                    # include relevant mj and add contributions[]
                                     for m1c in np.linspace(j1,-j1,round(1+2*j1)):
                                         for m2c in np.linspace(j2,-j2,round(1+2*j2)):
+                                            #I should get rid of this for the EarthAlkali atoms 
                                             if ((not limitBasisToMj) or (abs(originalMj-m1c-m2c)==0) ):
                                                 # find angular part
                                                 statePart1 = singleAtomState(j1, m1c)
                                                 statePart2 = singleAtomState(j2, m2c)
                                                 # rotate individual states
-                                                if not  isinstance(self.atom,EarthAlkaliAtom):
-                                                    dMatrix = wgd.get(j1)
-                                                    statePart1 = dMatrix.dot(statePart1)
-                                                    dMatrix = wgd.get(j2)
-                                                    statePart2 = dMatrix.dot(statePart2)
+                                                #if not  isinstance(self.atom,EarthAlkaliAtom):
+                                                
+                                                
+                                                dMatrix = wgd.get(j1)
+                                                statePart1 = dMatrix.dot(statePart1)
+                                                dMatrix = wgd.get(j2)
+                                                statePart2 = dMatrix.dot(statePart2)
                                                 # composite state of two atoms
                                                 stateCom2 = compositeState(statePart1, statePart2)
-
+    
                                                 d = self.__getAngularMatrix_M(self.l,self.j,
                                                                                self.ll,self.jj,
                                                                                l1,j1,
                                                                                l2,j2,
-                                                                               self.atom,theta,phi)
+                                                                               self.atom)
                                                 #check to see if there is already the anglular parts included
                                                 #if  isinstance(self.atom,EarthAlkaliAtom):
                                                 #    angularFactor = d
                                                 #else:
+                                                
                                                 angularFactor = conjugate(stateCom2.T).dot(d.dot(stateCom))
                                                 #print('angualar factor, coupling strength', angularFactor, couplingStregth)
                                                 angularFactor = real(angularFactor[0,0])
                                                 C6 += -((couplingStregth*angularFactor)**2/getEnergyDefect)
-                                print(C6)
-                                print()
+                              
                                 j2 = j2+1.0
                             j1 = j1+1.0
 
-
         # ========= END OF THE MAIN CODE ===========
         self.__closeDatabaseForMemoization()
+        
         return C6
 
+    #def getC6perturbively()
+    #should take an M1 and M2 and M1' and M2' value for us to return the value of 
+    def getC6term(self,n1,l1,j1,n2,l2,j2,m1_ini,m1_fini,m2_ini,m2_fini, m1_pairstate, m2_pairstate,theta,phi):
+        wgd = wignerDmatrix(theta,phi)
+        
+        
+        #HAVE TO MAKE TWO SETS OF PAIRSTATES WE NEED to get the angular momentutm twice
+        ed = self.atom.getEnergyDefect2(self.n,self.l,self.j,\
+                                  self.nn,self.ll,self.jj,\
+                                  n1,l1,j1,\
+                                  n2,l2,int(j2),self.s)/C_h* 1.0e-9 
+                                    
+        d = self.__getAngularMatrix_M(self.l,self.j,self.ll,self.jj,\
+                                      l1,j1,l2,j2,self.atom)
+        
+        #get the first angular part 
+        statePart1 = singleAtomState(self.j, m1_ini)
+        dMatrix = wgd.get(self.j)
+        statePart1 = dMatrix.dot(statePart1)
+        
+        statePart1_final = singleAtomState(self.j,m1_fini)
+        statePart1_final = dMatrix.dot(statePart1_final)
+        
+        
+        #get the rotate states for the final 
+        statePart2 = singleAtomState(self.jj, m2_ini)
+        dMatrix = wgd.get(self.jj)
+        statePart2 = dMatrix.dot(statePart2)
+        
+        statePart2_final = singleAtomState(self.jj,m2_fini)
+        statePart2_final = dMatrix.dot(statePart2_final)
+        
+    
+        #get the rotated states for the pairstate
+        statePart1_pair = singleAtomState(j1,m1_pairstate)
+        dMatrix = wgd.get(j1)
+        statePart1_pair = dMatrix.dot(statePart1_pair)
+        
+        statePart2_pair = singleAtomState(j2,m2_pairstate)
+        dMatrix = wgd.get(j2)
+        statePart2_pair = dMatrix.dot(statePart2_pair)
+        
+        stateCom = compositeState(statePart1, statePart2)
+
+        stateCom_final = compositeState(statePart1_final, statePart2_final)
+
+        
+        stateCom_pair = compositeState(statePart1_pair, statePart2_pair)
+       
+        #angular Calcuation     LIZZY cHECK THIS IS CORECT
+        #print('inital paistate composite',stateCom.shape)
+        #print('Final paistate composite',stateCom_final.shape)
+
+        
+        angularFactor1 = conjugate(stateCom_pair.T).dot(d.dot(stateCom))
+        angularFactor1 = real(angularFactor1[0,0])
+        
+        angularFactor2 = conjugate(stateCom_pair.T).dot(d.dot(stateCom_final))
+        angularFactor2 = real(angularFactor2[0,0])
+        #get the light atom coupling here 
+        
+        #print('angular',angularFactor1)
+        #print('agular2',angularFactor2)
+        
+        couplingStrength = _atomLightAtomCoupling(self.n,self.l,self.j,\
+                                            self.nn,self.ll,self.jj,\
+                                            n1,l1,j1,\
+                                            n2,l2,j2,self.atom,self.s)*(1.0e-9*(1.0e6)**3/C_h) # GHz / mum^3
+
+        #write
+       #have to loop over all pairstates, Work out the small C6 elements.
+
+    #def 
+        #print('M element',-(couplingStrength**2*angularFactor1*angularFactor2)/ed)
+        return -(couplingStrength**2*angularFactor1*angularFactor2)/ed
+    
+    def commonStates(self, arr1, arr2):
+        nrows, ncols = arr1.shape
+        dtype={'names':['f{}'.format(i) for i in range(ncols)],
+       'formats':ncols * [arr1.dtype]}
+
+        common = np.intersect1d(arr1.view(dtype), arr2.view(dtype))
+
+        return common
+    
+    def getIntermediateQuantumNumbers(self,n,l,s,j,m,rangeOfN):
+        '''This is going to take some initial state and some final state'''
+        #first we get the range of
+        nRange = np.arange(n-rangeOfN, n+rangeOfN+1,1)
+        LRange = np.delete(np.array([l-1, l+1]), np.where(np.array([l-1, l+1])<0))
+        MRange = np.array([m-1,m,m+1])
+        if j == 0:
+            JRange = np.array([1])
+        else:
+            JRange = np.array([j-1,j,j+1])
+
+        #create a matrix of n,l,s,j,m values, 0:n, 1:l, 2:s, 3:j, 4:m
+        out =np.array(list(itertools.product(nRange,LRange,np.array([s]), JRange, MRange)))
+        #now remove where Mj > J
+        out = np.delete(out[:], np.where(abs(out[:,4])>out[:,3]),axis = 0).reshape(-1,5)
+        #remove where J> L+S  J< abs(l-S)
+        out = np.delete(out[:], np.where(abs(out[:,3])>(out[:,2]+out[:,1])),axis = 0).reshape(-1,5)
+        out = np.delete(out[:], np.where(abs(out[:,3])<abs(out[:,1]-out[:,2])),axis = 0).reshape(-1,5)
+
+        #out = np.delete(out, [n,l,s,j,m], axis = 0).shape
+        return out
+    def getIntermediatePairstates(self,n1,l1,s1,j1, m1, n2, l2,s2,j2,m2,nRange):
+        '''This is going to take quantum numbers and return
+        an array consisiting of all possible combinations of the valid pairstates
+
+        This is going to be used to work out intermediate pairstates between inital and final values of M,
+        this means that the spin
+        '''
+        pairstates_a = self.getIntermediateQuantumNumbers(n1,l1,s1,j1,m1,nRange)
+        pairstates_b = self.getIntermediateQuantumNumbers(n2,l2,s2,j2,m2,nRange)
+        out = np.array(list(itertools.product(pairstates_a, pairstates_b))).reshape(-1,10)
+        return out
+
+    def _getC6perturbativelyEarthAlkali(self,m1, m2, m1f, m2f, theta, phi, nRange):
+        #this should facilitate for the provision of a M1, M2, M1' and an M2'. For which we return the small C6
+        #the m1', m2' should be provided in the construtor
+        #get the intermeidate pairstates, 
+        #
+         
+
+        states_a = self.getIntermediatePairstates(self.n,self.l,self.s,self.j,m1,self.nn,self.ll,self.s,self.jj, m2,nRange)
+        states_b = self.getIntermediatePairstates(self.n,self.l,self.s,self.j,m1f, self.n,self.ll,self.s,self.jj, m2f, nRange)
+
+        common = self.commonStates(states_a, states_b)
+        #print(common.shape)
+        terms = [self.getC6term( n_i, l_i, j_i,  n1_i, l1_i, j1_i,m1,m1f, m2, m2f, m_i,m1_i,theta, phi) \
+                for n_i, l_i, s_i, j_i, m_i, n1_i, l1_i, s1_i, j1_i, m1_i in common]
+        c6 = np.sum(terms, axis = 0)
+        
+        return c6
+    
+    def getC6Diagonalisation(self, theta, phi, nRange):
+        '''This carries out a full diagonalistaion of the C6 matrix 
+        
+        Need to add the matrix saving option and the progress output
+        Need to add matrix loading and saving
+        
+        '''
+        self.__initializeDatabaseForMemoization() 
+        
+        
+        dim = (2*self.jj +1)*(2*self.j+1)
+        mat = np.zeros((dim,dim), dtype = 'complex')
+        m_list = np.arange(-self.j, self.j+1)
+        m1_list = np.arange(-self.jj, self.jj+1)
+
+        #Make a list of all possible combinations of ms
+        pairs = np.array(list(itertools.product(m_list, m1_list)))
+        #sum these to work out the omegas
+        omegas = np.sum(pairs, axis = 1 ).reshape((-1,1))
+        #print(omegas)
+
+        concat = np.concatenate((omegas, pairs), axis = 1)
+        
+        #print(concat)
+
+        sorted_pairs = concat[np.lexsort((concat[:,1],concat[:,0])),:]
+        sorted_pairs = sorted_pairs[:,1:]
+        #print(sorted_pairs)
+
+        #the symmetric states were taken from Angelas
+        if self.j==1: #e.g.3S1
+            symindices = [[0,0],[1,1],[1,2],[3,3],[3,4],[3,5],[4,4]]
+        elif self.j==2: #e.g. 3D2
+            symindices = [[0,0],[1,1],[1,2],[3,3],[3,4],[3,5],[4,4],[6,6],[6,7],[6,8],[6,9],\
+            [7,7],[7,9],[10,10],[10,11],[10,12],[10,13],[10,14],[11,11],[11,12],[11,13],[12,12]]
+
+        if(self.j == 0 ): symindices= [[0,0]]
+
+        #my code again
+        #for i,k in symindices:
+        for i in range(dim):
+            for k in range(dim):
+                m1, m2 = sorted_pairs[i]
+                m1f, m2f = sorted_pairs[k]
+                
+                #print('['+str(k)+']',m1f,m2f)
+                
+                mat[i,k] = self._getC6perturbativelyEarthAlkali(m1, m2, m1f, m2f, theta, phi, nRange)
+                #if mat[i,k] != 0.:
+                    #print(i,k)
+                    #print(m1, m2, m1f, m2f)
+                    #print(mat[i,k]/1.4448e-19)
+                
+        #if self.j==1:
+        #    mat[8,8] = mat[0,0]
+        #    mat[2,2], mat[6,6], mat[7,7] = np.repeat(mat[1,1], 3)
+        #    mat[2,1], mat[6,7], mat[7,6] = np.repeat(mat[1,2], 3)
+        #    mat[5,5] = mat[3,3]
+        #    mat[4,3], mat[4,5], mat[5,4] = np.repeat(mat[3,4], 3)
+        #    mat[5,3] = mat[3,5]
+        #elif self.j==2:
+        #    mat[24,24] = mat[0,0]
+        #    mat[2,2], mat[22,22], mat[23,23] = np.repeat(mat[1,1], 3)
+        #    mat[2,1], mat[22,23], mat[23,22] = np.repeat(mat[1,2], 3)
+        #    mat[5,5], mat[19,19], mat[21,21] = np.repeat(mat[3,3], 3)
+        #    mat[4,3], mat[4,5], mat[5,4], mat[19,20], mat[20,19], mat[20,21], mat[21,20] = np.repeat(mat[3,4], 7)
+        #    mat[5,3], mat[19,21], mat[21,19] = np.repeat(mat[3,5], 3)
+        #    mat[20,20] = mat[4,4]
+        #    mat[8,8], mat[16,16], mat[18,18] = np.repeat(mat[6,6], 3)
+        #    mat[7,6], mat[8,9], mat[9,8], mat[15,16], mat[16,15], mat[18,17], mat[17,18] = np.repeat(mat[6,7], 7)
+        #    mat[8,6], mat[16,18], mat[18,16] = np.repeat(mat[6,8], 3)
+        #    mat[7,8], mat[8,7], mat[9,6], mat[15,18], mat[16,17], mat[17,16], mat[18,15] = np.repeat(mat[6,9], 7)
+        #    mat[9,9], mat[15,15], mat[17,17] = np.repeat(mat[7,7], 3)
+        #    mat[9,7], mat[15,17], mat[17,15] = np.repeat(mat[7,9], 3)
+        #    mat[14,14] = mat[10,10]
+        #    mat[11,10], mat[13,14], mat[14,13] = np.repeat(mat[10,11], 3)
+        #    mat[12,10], mat[12,14], mat[14,12] = np.repeat(mat[10,12], 3)
+        #    mat[11,14], mat[13,10], mat[14,11] = np.repeat(mat[10,13], 3)
+        #    mat[14,10] = mat[10,14]
+        #    mat[13,13] = mat[11,11]
+        #    mat[12,11], mat[12,13], mat[13,12] = np.repeat(mat[11,12], 3)
+        #    mat[13,11] = mat[11,13]      
+            
+        self.__updateAngularMatrixElementsFile()
+
+        self.__closeDatabaseForMemoization()
+
+        
+        return np.linalg.eigh(mat)
 
     def defineBasis(self,theta,phi,nRange,lrange,energyDelta,\
                          Bz=0, progressOutput=False,debugOutput=False):
@@ -991,11 +1232,12 @@ class PairStateInteractions:
                                                     progressOutput=progressOutput,
                                                     debugOutput=debugOutput)
 
-        self.atom.updateDipoleMatrixElementsFile()
+        #self.atom.updateDipoleMatrixElementsFile()
         # generate all the states (with mj principal quantum number)
-
+        
         # opi = original pairstate index
         opi = 0
+        #print(self.coupling[0].data)
 
         # NEW FOR SPACE MATRIX
         self.index = np.zeros(len(self.channel)+1,dtype=np.int16)
@@ -1015,7 +1257,7 @@ class PairStateInteractions:
                         
                         #Then we add it to this list of  basis states 
                         self.basisStates.append([stateCoupled[0],stateCoupled[1],stateCoupled[2],m1c,
-                                        stateCoupled[3],stateCoupled[4],stateCoupled[5],m2c])
+                                        stateCoupled[3],stateCoupled[4],stateCoupled[5],m2c,stateCoupled[6]])
                         #then we add channel number to matrix element (should have m1*m2))
                         self.matrixElement.append(i)
 
@@ -1068,7 +1310,8 @@ class PairStateInteractions:
 
                 #LIZZY index change from 6 to 7
                 ed = self.channel[ii][7]
-
+                #print(self.channel)
+                #need to check if that is right? Maybe get using the debugging tools
                 # solves problems with exactly degenerate basisStates
                 degeneracyOffset = 0.00000001
 
@@ -1087,16 +1330,18 @@ class PairStateInteractions:
                     stateCom = compositeState(statePart1, statePart2)
 
                     if (matRIndex==0):
-                        zeemanShift = (self.atom.getZeemanEnergyShift(
-                                           self.basisStates[i][1],
-                                           self.basisStates[i][2],
-                                           self.basisStates[i][3],
-                                           self.Bz) + \
-                                       self.atom.getZeemanEnergyShift(
-                                           self.basisStates[i][5],
-                                           self.basisStates[i][6],
-                                           self.basisStates[i][7],
-                                           self.Bz)) / C_h * 1.0e-9   # in GHz
+                    #    zeemanShift = (self.atom.getZeemanEnergyShift(
+                     #                      self.basisStates[i][1],
+                      #                     self.basisStates[i][2],
+                       #                    self.basisStates[i][3],
+                    #                       self.Bz) + \
+                    #                   self.atom.getZeemanEnergyShift(
+                    #                       self.basisStates[i][5],
+                    #                       self.basisStates[i][6],
+                    #                       self.basisStates[i][7],
+                    #                       self.Bz)) / C_h * 1.0e-9   # in GHz
+                        
+                        zeemanShift = 0 
                         matDiagonalConstructor[0].append(ed + zeemanShift +
                                                          degeneracyOffset)
                         degeneracyOffset +=  0.00000001
@@ -1111,6 +1356,11 @@ class PairStateInteractions:
                         j = self.index[jj]
                         dMatrix3 = wgd.get(self.basisStates[j][2])
                         dMatrix4 = wgd.get(self.basisStates[j][6])
+                        
+                        #print('basis states i', self.basisStates[i],i)
+                        #print('basis states j', self.basisStates[j],j)
+
+                        #print()
 
                         if (self.index[jj]!=self.index[jj+1]):
                             d = self.__getAngularMatrix_M(self.basisStates[i][1],self.basisStates[i][2],
@@ -1138,15 +1388,14 @@ class PairStateInteractions:
 
                             if (abs(angularFactor)>1.e-5):
                                 matRConstructor[matRIndex][0].append(radialPart*angularFactor)
+                               #print(radialPart*angularFactor)
                                 matRConstructor[matRIndex][1].append(i)
                                 matRConstructor[matRIndex][2].append(j)
 
                                 matRConstructor[matRIndex][0].append(radialPart*angularFactor)
                                 matRConstructor[matRIndex][1].append(j)
                                 matRConstructor[matRIndex][2].append(i)
-                    print(matRConstructor)
-                    print(len(matRConstructor), len(matRConstructor[0]))
-                    print()
+                    
             matRIndex += 1
             if progressOutput or debugOutput:
                 print("\n")
@@ -1270,7 +1519,7 @@ class PairStateInteractions:
                         print(self.basisStates[i])
                     dme = self.atom.getDipoleMatrixElement(n1, l1,j1,m1,\
                                                             n2,l2,j2,m2,\
-                                                            q)
+                                                            q,self.s)
                     thisCoupling += dme
 
                 if int(abs(self.basisStates[i][5]-l1))==1 and \
@@ -1288,7 +1537,7 @@ class PairStateInteractions:
                         print(self.basisStates[i])
                     dme = self.atom.getDipoleMatrixElement(n1, l1,j1,m1,\
                                                             n2,l2,j2,m2,\
-                                                            q)
+                                                            q,self.s)
                     thisCoupling += dme
 
                 thisCoupling = abs(thisCoupling)**2
@@ -1417,8 +1666,8 @@ class PairStateInteractions:
         commonHeader = "Export from Alkali Rydberg Calculator (ARC) %s.\n" % ts
         commonHeader += ("\n *** Pair State interactions for %s %s m_j = %d/2 , %s m_j = %d/2 pair-state. ***\n\n" %\
                           (self.atom.elementName,
-                        printStateString(self.n, self.l, self.j), int(round(2.*self.m1)),\
-                        printStateString(self.nn, self.ll, self.jj), int(round(2.*self.m2)) ) )
+                        printStateString(self.n, self.l, self.j,self.s), int(round(2.*self.m1)),\
+                        printStateString(self.nn, self.ll, self.jj,self.s), int(round(2.*self.m2)) ) )
         if (self.interactionsUpTo==1):
             commonHeader += " - Pair-state interactions included up to dipole-dipole coupling.\n"
         elif (self.interactionsUpTo==2):
@@ -1517,7 +1766,7 @@ class PairStateInteractions:
             value+="+\\ldots"
         return value+"$"
 
-    def _addState(self,n1,l1,j1,mj1,n2,l2,j2,mj2):
+    def _addState(self,n1,l1,j1,mj1,n2,l2,j2,mj2,s):
         return "|%s %d/2,%s %d/2\\rangle" %\
              (printStateStringLatex(n1, l1, j1),int(2*mj1),\
               printStateStringLatex(n2, l2, j2),int(2*mj2))
