@@ -694,7 +694,8 @@ class StarkMap:
             self.ax.set_ylabel(r"State energy, $E/h$ (GHz)")
 
 
-        self.ax.set_ylim(-20,+20)
+        self.ax.set_ylim(-6,+3)
+        self.ax.invert_yaxis()
         ##
         self.ax.set_xlim(min(eFieldList)/100.,max(eFieldList)/100.)
         return 0

@@ -13,6 +13,9 @@ from time import gmtime, strftime #to time the code
 import time #to time the code
 import inspect, os #for obtaining current file's path
 import csv #for importing csv files
+from scipy.constants import h as C_h
+from scipy.constants import e as C_e
+from scipy.constants import physical_constants, pi , epsilon_0, hbar
 
 '''
 References:
@@ -131,7 +134,8 @@ def nu(n, L, J, S): #dimensionless
     
 def E(n, L, J, S): #atomic units
     '''Energy level - Valliant thesis Eqn (2.2)'''
-    return -1/(2*(nu(n, L, J, S))**2)
+    #LIzzy Changed
+    return -109736.627/8065.544 /((nu(n, L, J, S))**2)
 
 def D11(L1b, L2b, J1b, J2b, M1b, M2b, L1a, L2a, J1a, J2a, M1a, M2a, S, theta, phi):
     '''
@@ -178,6 +182,8 @@ This has been tested and gives the right results
 
 def g0(dnu):
     if dnu==0:
+        print('DELTA MU = 0 ')
+        print()
         ans=1
     else:
         ans=1/(3*dnu)*(angerj(dnu-1, -dnu)-angerj(dnu+1, -dnu))
@@ -210,6 +216,7 @@ def rad_dip_mat_el(na, nb, La, Lb, Ja, Jb, S):
     '''
     nu_a, nu_b = nu(na, La, Ja, S), nu(nb, Lb, Jb, S)    
     dnu = nu_a - nu_b
+    #print(dnu)
     dL = Lb - La
     nu_c = np.sqrt(nu_a*nu_b)
     L_c = 0.5*(La+Lb+1)
@@ -217,8 +224,8 @@ def rad_dip_mat_el(na, nb, La, Lb, Ja, Jb, S):
     return 3/2*(nu_c)**2*np.sqrt(1-(L_c/nu_c)**2)*(g0(dnu)+gamma*g1(dnu)+gamma**2*g2(dnu)+gamma**3*g3(dnu))
 
 def R11(n1a, n2a, L1a, L2a, J1a, J2a, n1b, n2b, L1b, L2b, J1b, J2b, S):
-    return rad_dip_mat_el(n1a,n1b,L1a,L1b,J1a,J1b,S)*rad_dip_mat_el(n2a,n2b,L2a,L2b,J2a,J2b, S)
-
+    return rad_dip_mat_el(n1a,n1b,L1a,L1b,J1a,J1b,S)*rad_dip_mat_el(n2a,n2b,L2a,L2b,J2a,J2b, S)*C_e**2/(4.0*pi*epsilon_0)*\
+                (physical_constants["Bohr radius"][0])**(2)
 def intermediate_qns(n, L, M, J, S):
     '''Finds all sets of quantum numbers for dipole-allowed intermediate states for each atom'''
     #by the dipole selection rules:
@@ -284,12 +291,26 @@ def sum_term(n1, L1, n2, L2, M1a, M2a, M1b, M2b, J1, J2, n1_i, L1_i, M1_i, n2_i,
     product = D11(L1, L2, J1, J2, M1a, M2a, L1_i, L2_i, J1_i, J2_i, M1_i, M2_i, S, theta, phi)
     
     #print('Angular part1', D11(L1, L2, J1, J2, M1a, M2a, L1_i, L2_i, J1_i, J2_i, M1_i, M2_i, S, theta, phi))
-    product *= R11(n1, n2, L1, L2, J1, J2, n1_i, n2_i, L1_i, L2_i, J1_i, J2_i, S)
+    product *= R11(n1, n2, L1, L2, J1, J2, n1_i, n2_i, L1_i, L2_i, J1_i, J2_i, S)*(1.0e-9*(1.0e6)**3/C_h)
     product *= D11(L1_i, L2_i, J1_i, J2_i, M1_i, M2_i, L1, L2, J1, J2, M1b, M2b, S, theta, phi)
     #print('angualr part2',D11(L1_i, L2_i, J1_i, J2_i, M1_i, M2_i, L1, L2, J1, J2, M1b, M2b, S, theta, phi))
-    product *= R11(n1_i, n2_i, L1_i, L2_i, J1_i, J2_i, n1, n2, L1, L2, J1, J2, S)
-    
- 
+    product *= R11(n1_i, n2_i, L1_i, L2_i, J1_i, J2_i, n1, n2, L1, L2, J1, J2, S)*(1.0e-9*(1.0e6)**3/C_h)
+    forster_defect =  forster_defect*C_e/C_h *1e-9
+
+    if abs(forster_defect) < 1.:
+        print(n1_i,L1_i,J1_i, n2_i, L2_i, J2_i, M1b,M2b,M1_i, M2_i)
+        print('radial',R11(n1, n2, L1, L2, J1, J2, n1_i, n2_i, L1_i, L2_i, J1_i, J2_i, S)*(1.0e-9*(1.0e6)**3/C_h)*R11(n1_i, n2_i, L1_i, L2_i, J1_i, J2_i, n1, n2, L1, L2, J1, J2, S)*(1.0e-9*(1.0e6)**3/C_h))
+        print('angular',D11(L1_i, L2_i, J1_i, J2_i, M1_i, M2_i, L1, L2, J1, J2, M1b, M2b, S, theta, phi)*D11(L1, L2, J1, J2, M1a, M2a, L1_i, L2_i, J1_i, J2_i, M1_i, M2_i, S, theta, phi))
+        print('ed', forster_defect)
+
+        print('int',qd(n1_i,L1_i,J1_i,S))
+        print('int',qd(n2_i,L2_i,J2_i,S))
+
+        print('int',E(n1_i, L1_i, J1_i, S)*C_e/C_h *1e-9)
+        print('int', E(n2_i, L2_i, J2_i, S)*C_e/C_h *1e-9) 
+        print(E(n1, L1, J1, S)*C_e/C_h *1e-9)
+        print( E(n2, L2, J2, S)*C_e/C_h *1e-9)
+        
     return 1/forster_defect*product #this does not include the negative sign before the summation
 
 
@@ -331,7 +352,7 @@ def c6_mat(n1, n2, L1, L2, J1, J2, S, theta, phi):
            #if i==3 and j==4: #COMMENT THIS OUT - for debugging only
            #print(i,j)
            M1a, M2a = M_pairs_sort[j]
-           print(M1a,M2a)
+           #print(M1a,M2a)
 
            if [i,j] in symindices: #only fill these matrix elements with the same omega = M1(')+M2(')
                 #M1a/M2a -> M1'/M2'; M1b/M2b -> M1/M2
@@ -340,7 +361,7 @@ def c6_mat(n1, n2, L1, L2, J1, J2, S, theta, phi):
                 M1b, M2b = M_pairs_sort[i]
                 #print('colunm',j)
                
-    
+                #print(M1a,M2a, M1b, M2b)
                 #pick out intermediate states allowed by (M1b, M2b) & (M1a, M2a)
                 states_a = intermediate_pairs(n1, L1, M1a, J1, n2, L2, M2a, J2, S)
                 states_b = intermediate_pairs(n1, L1, M1b, J1, n2, L2, M2b, J2, S)
@@ -366,10 +387,10 @@ def c6_mat(n1, n2, L1, L2, J1, J2, S, theta, phi):
                     term = -sum_term(n1, L1, n2, L2, M1a, M2a, M1b, M2b, J1, J2, n1_i, L1_i, M1_i, n2_i, L2_i, M2_i, J1_i, J2_i, S, theta, phi)
                     element_sum += term
                 mat[i, j] = element_sum
-                if mat[i,j] !=0:
-                    print(i,j)
-                    print(M1a, M2a, M1b,M2b)
-                    print(mat[i,j])
+                #if mat[i,j] !=0:
+                #    print(i,j)
+                #    print(M1a, M2a, M1b,M2b)
+                #    print(mat[i,j])
     #fill in other elements by symmetry
     if J1==1: 
         mat[8,8] = mat[0,0]

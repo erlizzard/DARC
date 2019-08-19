@@ -763,13 +763,33 @@ class AlkaliAtom(object):
                 return dipoleElement
             else:
                 semi = 1
+                if (self.getEnergy(n1, l1, j1,s)>self.getEnergy(n2, l2, j2,s)):
+                    temp = n1
+                    n1 = n2
+                    n2 = temp
+                    temp = l1
+                    l1 = l2
+                    l2 = temp
+                    temp = j1
+                    j1 = j2
+                    j2 = temp
+        
+                n1 = int(n1)
+                n2 = int(n2)
+                l1 = int(l1)
+                l2 = int(l2)
+                j1_x2 = int(round(2*j1))
+                j2_x2 = int(round(2*j2))
+                s = int(s)
+
+
                 if useLiterature:
                     # is there literature value for this DME? If there is, use the best one (smalles error)
                     self.c.execute('''SELECT dme FROM literatureDME WHERE
                      n1= ? AND l1 = ? AND j1_x2 = ? AND
                      n2 = ? AND l2 = ? AND j2_x2 = ? AND
-                     s = ? AND semi = ?
-                     ORDER BY errorEstimate ASC''',(n1,l1,j1_x2,n2,l2,j2_x2,s,semi))
+                     s = ?
+                     ORDER BY errorEstimate ASC''',(n1,l1,j1_x2,n2,l2,j2_x2,s))
                     answer = self.c.fetchone()
                     if (answer):
                         # we did found literature value
@@ -788,7 +808,7 @@ class AlkaliAtom(object):
                 dipoleElement = self.getRadialMatrixElementSemiClassical(n1,l1,j1, n2, l2, j2, s)
                 
                 self.c.execute(''' INSERT INTO dipoleME VALUES (?,?,?, ?,?,?, ?,?,?)''',\
-                               [n1,l1,j1_x2,n2,l2,j2_x2, dipoleElement,s,semi] )
+                           [n1,l1,j1_x2,n2,l2,j2_x2, float(dipoleElement),s,semi] )
                 self.conn.commit()
                 return dipoleElement
                     
@@ -809,15 +829,26 @@ class AlkaliAtom(object):
         delta_nu = nu- nu1
         delta_l = l1 -l
         
+        #print(delta_nu)
         #I am not sure if this correct 
-        if delta_nu ==0:
-            return 0
+        
         gamma  = (delta_l*l_c)/nu_c
 
-        g0 = (1./(3.*delta_nu))*(mpmath.angerj(delta_nu-1.,-delta_nu) - mpmath.angerj(delta_nu+1,-delta_nu))
-        g1 = -(1./(3.*delta_nu))*(mpmath.angerj(delta_nu-1.,-delta_nu) + mpmath.angerj(delta_nu+1,-delta_nu))
-        g2 = g0 - mpmath.sin(pi*delta_nu)/(pi*delta_nu)
-        g3 = (delta_nu/2.)*g0 + g1
+        if delta_nu ==0:
+            print('detla nu = 0')
+            print()
+            print()
+
+            g0 = 1
+            g1 = 0
+            g2 = 0
+            g3 = 0
+        else:
+
+            g0 = (1./(3.*delta_nu))*(mpmath.angerj(delta_nu-1.,-delta_nu) - mpmath.angerj(delta_nu+1,-delta_nu))
+            g1 = -(1./(3.*delta_nu))*(mpmath.angerj(delta_nu-1.,-delta_nu) + mpmath.angerj(delta_nu+1,-delta_nu))
+            g2 = g0 - mpmath.sin(pi*delta_nu)/(pi*delta_nu)
+            g3 = (delta_nu/2.)*g0 + g1
 
         radial_ME = (3/2)*nu_c**2*(1-(l_c/nu_c)**(2))**0.5*(g0 + gamma*g1 + gamma**2*g2 + gamma**3*g3)
 
@@ -1968,8 +1999,8 @@ def _atomLightAtomCoupling(n,l,j,nn,ll,jj,n1,l1,j1,n2,l2,j2,atom,s=0.5):
     radial1 = atom.getRadialCoupling(n,l,j,n1,l1,j1,s)
     radial2 = atom.getRadialCoupling(nn,ll,jj,n2,l2,j2,s)
     ## TO-DO: check exponent of the Boht radius (from where it comes?!)
-
-    
+    #print('radial1', radial1)
+    #print('radial2', radial2)
     coupling = C_e**2/(4.0*pi*epsilon_0)*radial1*radial2*\
                 (physical_constants["Bohr radius"][0])**(c1+c2)
     #coupling= radial1*radial2

@@ -1008,8 +1008,24 @@ class PairStateInteractions:
         #write
        #have to loop over all pairstates, Work out the small C6 elements.
 
-    #def 
-        #print('M element',-(couplingStrength**2*angularFactor1*angularFactor2)/ed)
+    #defi,
+        #if abs(ed) < 1.: 
+        #    print(n1,l1,j1,n2,l2,j2, m1_fini, m2_fini,m1_pairstate, m2_pairstate)
+        #    print('radial', couplingStrength**2)
+        #    print('angular',angularFactor1*angularFactor2)
+        #    print('ed',ed)
+
+        #   print('inter',self.atom.getQuantumDefect(n1,l1,j1,self.s))
+
+        #    print('inter',self.atom.getQuantumDefect(n2,l2,j2,self.s))
+        #    print(self.atom.getEnergy(n1,l1,j1,self.s)*C_e/C_h *1e-9)
+        #    print(self.atom.getEnergy(n2,l2,j2,self.s)*C_e/C_h *1e-9)
+        #    print(self.atom.getEnergy(self.n,self.l,self.j,self.s)*C_e/C_h *1e-9)
+        #    print(self.atom.getEnergy(self.nn,self.ll,self.jj,self.s)*C_e/C_h *1e-9)
+            
+
+        #    print()
+        #    print()
         return -(couplingStrength**2*angularFactor1*angularFactor2)/ed
     
     def commonStates(self, arr1, arr2):
@@ -1117,13 +1133,14 @@ class PairStateInteractions:
                 m1, m2 = sorted_pairs[i]
                 m1f, m2f = sorted_pairs[k]
                 
-                #print('['+str(k)+']',m1f,m2f)
+
+                #print('['+str(i)+','+str(k)+']',m1,m2,m1f,m2f)
                 
                 mat[i,k] = self._getC6perturbativelyEarthAlkali(m1, m2, m1f, m2f, theta, phi, nRange)
                 #if mat[i,k] != 0.:
-                    #print(i,k)
-                    #print(m1, m2, m1f, m2f)
-                    #print(mat[i,k]/1.4448e-19)
+                #    print(i,k)
+                #    print(m1, m2, m1f, m2f)
+                #    print(mat[i,k])
                 
         #if self.j==1:
         #    mat[8,8] = mat[0,0]
